@@ -1,7 +1,8 @@
 import json
+import time
 from typing import List, Optional
 
-import requests
+from requests import Session, Request
 
 from valrpy.enums import (
     TransactionType,
@@ -9,6 +10,7 @@ from valrpy.enums import (
     TimeInForce,
     TriggerOrderType,
 )
+from valrpy.utils import request_signature
 
 
 class ValrClient:
@@ -16,59 +18,134 @@ class ValrClient:
     Client for accessing public api endpoints.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: Optional[str] = None) -> None:
         self.url = "https://api.valr.com/v1"
+        self.api_key = api_key
 
-        self.session = requests.Session()
+        self.session = Session()
 
     # ========== REST HELPER METHODS ===========:
 
-    def _get(self, endpoint: str, params: Optional[dict] = None) -> dict | list:
-        response = self.session.get(f"{self.url}/{endpoint}", params=params)
+    def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        auth: bool,
+        **kwargs,
+    ) -> dict | list:
+        request = Request(
+            method=method,
+            url=f"{self.url}/{endpoint}",
+            **kwargs,
+        )
+        if auth:
+            self._sign_request(request=request)
+
+        response = self.session.send(request.prepare())
         try:
             return response.json()
 
         except json.JSONDecodeError:
             response.raise_for_status()
+            raise
 
-    def _post(self, endpoint: str, params: Optional[dict] = None) -> dict:
-        response = self.session.post(url=f"{self.url}/{endpoint}", data=params)
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            response.raise_for_status()
+    def _sign_request(self, request: Request) -> None:
+        if self.api_key is None:
+            raise ValueError(
+                "Must provide an api-key in order to sign a request. "
+                "Without an api-key, you can only hit public endpoints"
+            )
 
-    def _delete(self, endpoint: str, params: Optional[dict] = None) -> dict:
-        pass
+        timestamp = round(1e3 * time.time())
+        signature = request_signature(
+            api_key_secret=self.api_key,
+            method=request.method,
+            path=request.url,
+            body=request.json,
+            timestamp=timestamp,
+        )
+        request.headers["X-VALR-API-KEY"] = self.api_key
+        request.headers["X-VALR-SIGNATURE"] = signature
+        request.headers["X-VALR-TIMESTAMP"] = timestamp
+
+    def _get(
+        self, endpoint: str, auth: bool, params: Optional[dict] = None
+    ) -> dict | list:
+        response = self._make_request(
+            method="GET",
+            endpoint=endpoint,
+            auth=auth,
+            params=params,
+        )
+        return response
+
+    def _post(self, endpoint: str, auth: bool, params: Optional[dict] = None) -> dict:
+        response = self._make_request(
+            method="POST",
+            endpoint=endpoint,
+            auth=auth,
+            json=params,
+        )
+        return response
+
+    def _delete(self, endpoint: str, auth: bool, params: Optional[dict] = None) -> dict:
+        response = self._make_request(
+            method="DELETE",
+            endpoint=endpoint,
+            auth=auth,
+            json=params,
+        )
+        return response
 
     # ========== PUBLIC ENDPOINTS ===========:
 
     def get_orderbook(self, symbol: str) -> dict:
-        orderbook = self._get(endpoint=f"public/{symbol}/orderbook")
+        orderbook = self._get(
+            endpoint=f"public/{symbol}/orderbook",
+            auth=False,
+        )
         return orderbook
 
     def get_full_orderbook(self, symbol: str) -> dict:
-        orderbook = self._get(endpoint=f"public/{symbol}/orderbook/full")
+        orderbook = self._get(
+            endpoint=f"public/{symbol}/orderbook/full",
+            auth=False,
+        )
         return orderbook
 
     def get_currencies(self) -> List[dict]:
-        currencies = self._get(endpoint="public/currencies")
+        currencies = self._get(
+            endpoint="public/currencies",
+            auth=False,
+        )
         return currencies
 
     def get_all_order_types(self) -> List[dict]:
-        order_types = self._get(endpoint="public/ordertypes")
+        order_types = self._get(
+            endpoint="public/ordertypes",
+            auth=False,
+        )
         return order_types
 
     def get_symbol_order_types(self, symbol: str) -> List[str]:
-        order_types = self._get(endpoint=f"public/{symbol}/ordertypes")
+        order_types = self._get(
+            endpoint=f"public/{symbol}/ordertypes",
+            auth=False,
+        )
         return order_types
 
     def get_all_market_summaries(self) -> List[dict]:
-        market_summaries = self._get(endpoint="public/marketsummary")
+        market_summaries = self._get(
+            endpoint="public/marketsummary",
+            auth=False,
+        )
         return market_summaries
 
     def get_symbol_market_summary(self, symbol: str) -> dict:
-        market_summary = self._get(endpoint=f"public/{symbol}/marketsummary")
+        market_summary = self._get(
+            endpoint=f"public/{symbol}/marketsummary",
+            auth=False,
+        )
         return market_summary
 
     def get_trade_history(
@@ -88,29 +165,45 @@ class ValrClient:
         trade_history = self._get(
             endpoint=f"public/{symbol}/trades",
             params=params,
+            auth=False,
         )
         return trade_history
 
     def get_server_time(self) -> dict:
-        server_time = self._get(endpoint="public/time")
+        server_time = self._get(
+            endpoint="public/time",
+            auth=False,
+        )
         return server_time
 
     def get_exchange_status(self) -> dict:
-        exchange_status = self._get(endpoint="public/status")
+        exchange_status = self._get(
+            endpoint="public/status",
+            auth=False,
+        )
         return exchange_status
 
     # ========== ACCOUNT INFO ==========:
 
     def get_current_api_key_info(self) -> dict:
-        info = self._get(endpoint="account/api-keys/current")
+        info = self._get(
+            endpoint="account/api-keys/current",
+            auth=True,
+        )
         return info
 
     def get_subaccounts(self) -> List[dict]:
-        subaccounts = self._get(endpoint="account/subaccounts")
+        subaccounts = self._get(
+            endpoint="account/subaccounts",
+            auth=True,
+        )
         return subaccounts
 
     def get_non_zero_balances(self) -> List[dict]:
-        balances = self._get(endpoint="account/balances/all")
+        balances = self._get(
+            endpoint="account/balances/all",
+            auth=True,
+        )
         return balances
 
     def register_subaccount(self, label: str) -> dict:
@@ -120,6 +213,7 @@ class ValrClient:
         response = self._post(
             endpoint="account/subaccount",
             params=params,
+            auth=True,
         )
         return response
 
@@ -139,11 +233,15 @@ class ValrClient:
         response = self._post(
             endpoint="account/subaccounts/transfer",
             params=params,
+            auth=True,
         )
         return response
 
     def get_balances(self) -> List[dict]:
-        balances = self._get(endpoint="account/balances")
+        balances = self._get(
+            endpoint="account/balances",
+            auth=True,
+        )
         return balances
 
     def get_transaction_history(
@@ -168,6 +266,7 @@ class ValrClient:
         transactions = self._get(
             endpoint="account/transactionhistory",
             params=params,
+            auth=True,
         )
         return transactions
 
@@ -178,6 +277,7 @@ class ValrClient:
         trade_history = self._get(
             endpoint=f"account/{symbol}/tradehistory",
             params=params,
+            auth=True,
         )
         return trade_history
 
@@ -185,20 +285,30 @@ class ValrClient:
 
     def get_currency_deposit_address(self, currency: str) -> dict:
         deposit_address = self._get(
-            endpoint=f"wallet/crypto/{currency}/deposit/address"
+            endpoint=f"wallet/crypto/{currency}/deposit/address",
+            auth=True,
         )
         return deposit_address
 
     def get_whitelisted_withdrawal_address_book(self) -> List[dict]:
-        address_book = self._get(endpoint="wallet/crypto/address-book")
+        address_book = self._get(
+            endpoint="wallet/crypto/address-book",
+            auth=True,
+        )
         return address_book
 
     def get_currency_whitelisted_withdrawal_address_book(self, currency: str) -> dict:
-        address_book = self._get(endpoint=f"wallet/crypto/address-book/{currency}")
+        address_book = self._get(
+            endpoint=f"wallet/crypto/address-book/{currency}",
+            auth=True,
+        )
         return address_book
 
     def get_withdrawal_info(self, currency: str) -> dict:
-        info = self._get(endpoint=f"wallet/crypto/{currency}/withdraw")
+        info = self._get(
+            endpoint=f"wallet/crypto/{currency}/withdraw",
+            auth=True,
+        )
         return info
 
     def make_crypto_withdrawal(self, currency: str, amount: str, address: str) -> dict:
@@ -209,12 +319,14 @@ class ValrClient:
         response = self._post(
             endpoint=f"wallet/crypto/{currency}/withdraw",
             params=params,
+            auth=True,
         )
         return response
 
     def get_withdrawal_status(self, currency: str, withdrawal_id: str) -> dict:
         status = self._get(
-            endpoint=f"wallet/crypto/{currency}/withdraw/{withdrawal_id}"
+            endpoint=f"wallet/crypto/{currency}/withdraw/{withdrawal_id}",
+            auth=True,
         )
         return status
 
@@ -228,6 +340,7 @@ class ValrClient:
         history = self._get(
             endpoint=f"wallet/crypto/{currency}/receive/history",
             params=params,
+            auth=True,
         )
         return history
 
@@ -241,15 +354,22 @@ class ValrClient:
         history = self._get(
             endpoint=f"wallet/crypto/{currency}/withdraw/history",
             params=params,
+            auth=True,
         )
         return history
 
     def get_associated_bank_accounts(self, currency: str) -> List[dict]:
-        accounts = self._get(endpoint=f"wallet/fiat/{currency}/accounts")
+        accounts = self._get(
+            endpoint=f"wallet/fiat/{currency}/accounts",
+            auth=True,
+        )
         return accounts
 
     def get_deposit_reference(self, currency: str) -> dict:
-        reference = self._get(endpoint=f"wallet/fiat/{currency}/deposit/reference")
+        reference = self._get(
+            endpoint=f"wallet/fiat/{currency}/deposit/reference",
+            auth=True,
+        )
         return reference
 
     def make_fiat_withdrawal(
@@ -263,11 +383,15 @@ class ValrClient:
         response = self._get(
             endpoint=f"wallet/fiat/{currency}/withdrawal",
             params=params,
+            auth=True,
         )
         return response
 
     def get_wire_accounts(self) -> List[dict]:
-        accounts = self._get(endpoint="wire/accounts")
+        accounts = self._get(
+            endpoint="wire/accounts",
+            auth=True,
+        )
         return accounts
 
     def make_wire_withdrawal(self, amount: str, wire_account_id: str) -> dict:
@@ -278,6 +402,7 @@ class ValrClient:
         response = self._post(
             endpoint="wire/withdrawals",
             params=params,
+            auth=True,
         )
         return response
 
@@ -294,6 +419,7 @@ class ValrClient:
         response = self._post(
             endpoint=f"simple/{symbol}/quote",
             params=params,
+            auth=True,
         )
         return response
 
@@ -308,11 +434,15 @@ class ValrClient:
         response = self._post(
             endpoint=f"simple/{symbol}/quote",
             params=params,
+            auth=True,
         )
         return response
 
     def get_simple_order_status(self, symbol: str, order_id: str) -> dict:
-        status = self._get(endpoint=f"simple/{symbol}/order/{order_id}")
+        status = self._get(
+            endpoint=f"simple/{symbol}/order/{order_id}",
+            auth=True,
+        )
         return status
 
     # ========== PAYMENT ENDPOINTS ==========:
@@ -344,6 +474,7 @@ class ValrClient:
         response = self._post(
             endpoint="pay",
             params=params,
+            auth=True,
         )
         return response
 
@@ -354,23 +485,36 @@ class ValrClient:
         response = self._get(
             endpoint=f"pay/limits",
             params=params,
+            auth=True,
         )
         return response
 
     def get_account_pay_id(self) -> dict:
-        pay_id = self._get(endpoint="pay/payid")
+        pay_id = self._get(
+            endpoint="pay/payid",
+            auth=True,
+        )
         return pay_id
 
     def get_payment_history(self) -> List[dict]:
-        history = self._get(endpoint="pay/history")
+        history = self._get(
+            endpoint="pay/history",
+            auth=True,
+        )
         return history
 
     def get_payment_details(self, payment_identifier: str) -> dict:
-        details = self._get(endpoint=f"pay/identifier/{payment_identifier}")
+        details = self._get(
+            endpoint=f"pay/identifier/{payment_identifier}",
+            auth=True,
+        )
         return details
 
     def get_payment_status(self, transaction_id: str) -> dict:
-        status = self._get(endpoint=f"pay/transactionid/{transaction_id}")
+        status = self._get(
+            endpoint=f"pay/transactionid/{transaction_id}",
+            auth=True,
+        )
         return status
 
     # ========== EXCHANGE TRADING ENDPOINTS ==========:
@@ -397,6 +541,7 @@ class ValrClient:
         response = self._post(
             endpoint="orders/limit",
             params=params,
+            auth=True,
         )
         return response
 
@@ -416,6 +561,7 @@ class ValrClient:
         response = self._post(
             endpoint="orders/market",
             params=params,
+            auth=True,
         )
         return response
 
@@ -443,6 +589,7 @@ class ValrClient:
         response = self._post(
             endpoint="orders/stop/limit",
             params=params,
+            auth=True,
         )
         return response
 
@@ -462,11 +609,17 @@ class ValrClient:
             if order_id is not None
             else f"orders/{symbol}/customerorderid/{client_order_id}"
         )
-        status = self._get(endpoint=endpoint)
+        status = self._get(
+            endpoint=endpoint,
+            auth=True,
+        )
         return status
 
     def get_open_orders(self) -> List[dict]:
-        open_orders = self._get(endpoint="orders/open")
+        open_orders = self._get(
+            endpoint="orders/open",
+            auth=True,
+        )
         return open_orders
 
     def get_order_history(
@@ -479,6 +632,7 @@ class ValrClient:
         order_history = self._get(
             endpoint="orders/history",
             params=params,
+            auth=True,
         )
         return order_history
 
@@ -497,7 +651,10 @@ class ValrClient:
             if order_id is not None
             else f"orders/history/summary/customerorderid/{client_order_id}"
         )
-        summary = self._get(endpoint=endpoint)
+        summary = self._get(
+            endpoint=endpoint,
+            auth=True,
+        )
         return summary
 
     def get_old_order_details(
@@ -515,7 +672,10 @@ class ValrClient:
             if order_id is not None
             else f"orders/history/detail/customerorderid/{client_order_id}"
         )
-        details = self._get(endpoint=endpoint)
+        details = self._get(
+            endpoint=endpoint,
+            auth=True,
+        )
         return details
 
     def cancel_order(
@@ -537,10 +697,14 @@ class ValrClient:
         response = self._delete(
             endpoint="orders/order",
             params=params,
+            auth=True,
         )
         return response
 
     def cancel_all_open_orders(self, symbol: Optional[str] = None) -> dict:
         endpoint = "orders" if symbol is None else f"orders/{symbol}"
-        response = self._delete(endpoint=endpoint)
+        response = self._delete(
+            endpoint=endpoint,
+            auth=True,
+        )
         return response
