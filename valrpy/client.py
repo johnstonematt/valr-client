@@ -39,7 +39,10 @@ class ValrClient:
             **kwargs,
         )
         if auth:
-            self._sign_request(request=request)
+            self._sign_request(
+                request=request,
+                endpoint=endpoint,
+            )
 
         response = self._session.send(request.prepare())
         try:
@@ -49,7 +52,7 @@ class ValrClient:
             response.raise_for_status()
             raise
 
-    def _sign_request(self, request: Request) -> None:
+    def _sign_request(self, request: Request, endpoint: str) -> None:
         if self._api_key is None:
             raise ValueError(
                 "Must provide an api-key in order to sign a request. "
@@ -60,7 +63,7 @@ class ValrClient:
         signature = request_signature(
             api_key_secret=self._api_key,
             method=request.method,
-            path=request.url,
+            path=f"v1/{endpoint}",
             body=request.json,
             timestamp=timestamp,
         )

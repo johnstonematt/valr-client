@@ -4,6 +4,10 @@
 # test scripts:
 playground.py
 
+# testing:
+.pytest_cache
+#tests/.pytest_cache
+
 # intellij:
 .idea
 
