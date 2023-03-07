@@ -19,10 +19,10 @@ class ValrClient:
     """
 
     def __init__(self, api_key: Optional[str] = None) -> None:
-        self.url = "https://api.valr.com/v1"
-        self.api_key = api_key
+        self._url = "https://api.valr.com/v1"
+        self._api_key = api_key
 
-        self.session = Session()
+        self._session = Session()
 
     # ========== REST HELPER METHODS ===========:
 
@@ -35,13 +35,13 @@ class ValrClient:
     ) -> dict | list:
         request = Request(
             method=method,
-            url=f"{self.url}/{endpoint}",
+            url=f"{self._url}/{endpoint}",
             **kwargs,
         )
         if auth:
             self._sign_request(request=request)
 
-        response = self.session.send(request.prepare())
+        response = self._session.send(request.prepare())
         try:
             return response.json()
 
@@ -50,7 +50,7 @@ class ValrClient:
             raise
 
     def _sign_request(self, request: Request) -> None:
-        if self.api_key is None:
+        if self._api_key is None:
             raise ValueError(
                 "Must provide an api-key in order to sign a request. "
                 "Without an api-key, you can only hit public endpoints"
@@ -58,13 +58,13 @@ class ValrClient:
 
         timestamp = round(1e3 * time.time())
         signature = request_signature(
-            api_key_secret=self.api_key,
+            api_key_secret=self._api_key,
             method=request.method,
             path=request.url,
             body=request.json,
             timestamp=timestamp,
         )
-        request.headers["X-VALR-API-KEY"] = self.api_key
+        request.headers["X-VALR-API-KEY"] = self._api_key
         request.headers["X-VALR-SIGNATURE"] = signature
         request.headers["X-VALR-TIMESTAMP"] = timestamp
 
