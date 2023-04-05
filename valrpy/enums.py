@@ -12,7 +12,19 @@ __all__ = [
 ]
 
 
-class TimeInForce(str, Enum):
+class BaseStrEnum(str, Enum):
+    """
+    Base class for str enums.
+    """
+
+    def __str__(self) -> str:
+        return self.value
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+class TimeInForce(BaseStrEnum):
     """
     Time-in-force available on VALR
     """
@@ -22,7 +34,7 @@ class TimeInForce(str, Enum):
     IOC = "IOC"  # immediate or cancel
 
 
-class OrderType(str, Enum):
+class OrderType(BaseStrEnum):
     """
     Order-types available on VALR
     """
@@ -35,7 +47,7 @@ class OrderType(str, Enum):
     TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT"
 
 
-class OrderSide(str, Enum):
+class OrderSide(BaseStrEnum):
     """
     Order side on VALR.
     """
@@ -44,7 +56,7 @@ class OrderSide(str, Enum):
     SELL = "SELL"
 
 
-class TransactionType(str, Enum):
+class TransactionType(BaseStrEnum):
     """
     Types of transactions in VALR api.
     """
@@ -77,7 +89,7 @@ class TransactionType(str, Enum):
     SIMPLE_SWAP_FAILURE_REVERSAL = "SIMPLE_SWAP_FAILURE_REVERSAL"
 
 
-class TriggerOrderType(str, Enum):
+class TriggerOrderType(BaseStrEnum):
     """
     Types of trigger orders available on VALR
     """
@@ -86,7 +98,7 @@ class TriggerOrderType(str, Enum):
     TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT"
 
 
-class OrderInstruction(str, Enum):
+class OrderInstruction(BaseStrEnum):
     """
     Types of order-actions available on VALR
     """
@@ -97,7 +109,7 @@ class OrderInstruction(str, Enum):
     CANCEL_ORDER = "CANCEL_ORDER"
 
 
-class WebsocketType(str, Enum):
+class WebsocketType(BaseStrEnum):
     """
     Type of websockets on VALR
     """
@@ -119,7 +131,7 @@ class WebsocketType(str, Enum):
                 )
 
 
-class WebsocketMessageType(str, Enum):
+class WebsocketMessageType(BaseStrEnum):
     """
     Type of websocket messages from VALR
     """
@@ -130,6 +142,8 @@ class WebsocketMessageType(str, Enum):
     PONG = "PONG"
     SUBSCRIBE = "SUBSCRIBE"
     UNSUBSCRIBE = "UNSUBSCRIBE"
+    SUBSCRIBED = "SUBSCRIBED"
+    UNSUBSCRIBED = "UNSUBSCRIBED"
     NO_SUBSCRIPTIONS = "NO_SUBSCRIPTIONS"
     # account updates:
     NEW_ACCOUNT_HISTORY_RECORD = "NEW_ACCOUNT_HISTORY_RECORD"
@@ -149,6 +163,23 @@ class WebsocketMessageType(str, Enum):
     NEW_TRADE_BUCKET = "NEW_TRADE_BUCKET"
     NEW_TRADE = "NEW_TRADE"
     MARK_PRICE_UPDATE = "MARK_PRICE_UPDATE"
+
+    def has_data(self) -> bool:
+        match self:
+            case (
+                WebsocketMessageType.AUTHENTICATED
+                | WebsocketMessageType.PING
+                | WebsocketMessageType.PONG
+                | WebsocketMessageType.SUBSCRIBE
+                | WebsocketMessageType.UNSUBSCRIBE
+                | WebsocketMessageType.SUBSCRIBED
+                | WebsocketMessageType.UNSUBSCRIBED
+                | WebsocketMessageType.NO_SUBSCRIPTIONS
+            ):
+                return False
+
+            case _:
+                return True
 
     def websocket_type(self) -> WebsocketType:
         match self:

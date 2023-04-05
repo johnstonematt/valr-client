@@ -1,4 +1,6 @@
 import json
+from decimal import Decimal
+from datetime import datetime
 from typing import List, Optional, Union
 
 from requests import Session, Request
@@ -9,7 +11,13 @@ from valrpy.enums import (
     TimeInForce,
     TriggerOrderType,
 )
-from valrpy.utils import generate_headers, RestException
+from valrpy.utils import generate_headers, RestException, datetime_to_milliseconds
+from valrpy.messages import (
+    AggregatedOrderbookData,
+    FullOrderbookData,
+    CurrencyInfo,
+    CurrencyPairInfo,
+)
 
 
 class ValrRestConnector:
@@ -118,26 +126,33 @@ class ValrRestConnector:
 
     # ========== PUBLIC ENDPOINTS ===========:
 
-    def get_orderbook(self, symbol: str) -> dict:
-        orderbook = self._get(
+    def get_aggregated_orderbook(self, symbol: str) -> AggregatedOrderbookData:
+        orderbook_data = self._get(
             endpoint=f"public/{symbol}/orderbook",
             auth=False,
         )
-        return orderbook
+        return AggregatedOrderbookData.from_raw(raw=orderbook_data)
 
-    def get_full_orderbook(self, symbol: str) -> dict:
+    def get_full_orderbook(self, symbol: str) -> FullOrderbookData:
         orderbook = self._get(
             endpoint=f"public/{symbol}/orderbook/full",
             auth=False,
         )
-        return orderbook
+        return FullOrderbookData.from_raw(raw=orderbook)
 
-    def get_currencies(self) -> List[dict]:
+    def get_currencies(self) -> List[CurrencyInfo]:
         currencies = self._get(
             endpoint="public/currencies",
             auth=False,
         )
-        return currencies
+        return [CurrencyInfo.from_raw(raw=raw_info) for raw_info in currencies]
+
+    def get_currency_pairs(self) -> List[CurrencyPairInfo]:
+        pairs = self._get(
+            endpoint="public/pairs",
+            auth=False,
+        )
+        return [CurrencyPairInfo.from_raw(raw=raw_pair) for raw_pair in pairs]
 
     def get_all_order_types(self) -> List[dict]:
         order_types = self._get(
@@ -172,14 +187,14 @@ class ValrRestConnector:
         symbol: str,
         skip: int = 0,
         limit: int = 10,
-        start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> List[dict]:
         params = {
             "skip": skip,
             "limit": limit,
-            "startTime": start_time,
-            "endTime": end_time,
+            "startTime": datetime_to_milliseconds(dt=start_time),
+            "endTime": datetime_to_milliseconds(dt=end_time),
         }
         trade_history = self._get(
             endpoint=f"public/{symbol}/trades",
@@ -241,7 +256,7 @@ class ValrRestConnector:
         from_id: str,
         to_id: str,
         symbol: str,
-        amount: float,
+        amount: Decimal,
     ) -> dict:
         params = {
             "fromId": from_id,
@@ -268,16 +283,16 @@ class ValrRestConnector:
         skip: int = 0,
         limit: int = 200,
         currency: Optional[str] = None,
-        start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         transaction_types: Optional[List[TransactionType]] = None,
     ) -> List[dict]:
         params = {
             "skip": skip,
             "limit": limit,
             "currency": currency,
-            "startTime": start_time,
-            "endTime": end_time,
+            "startTime": datetime_to_milliseconds(dt=start_time),
+            "endTime": datetime_to_milliseconds(dt=end_time),
             "transactionTypes": ",".join(transaction_types)
             if transaction_types is not None
             else None,
@@ -330,7 +345,9 @@ class ValrRestConnector:
         )
         return info
 
-    def make_crypto_withdrawal(self, currency: str, amount: str, address: str) -> dict:
+    def make_crypto_withdrawal(
+        self, currency: str, amount: Decimal, address: str
+    ) -> dict:
         params = {
             "amount": amount,
             "address": address,
@@ -392,7 +409,7 @@ class ValrRestConnector:
         return reference
 
     def make_fiat_withdrawal(
-        self, currency: str, amount: str, bank_account_id: str, fast: bool
+        self, currency: str, amount: Decimal, bank_account_id: str, fast: bool
     ) -> dict:
         params = {
             "amount": amount,
@@ -428,7 +445,7 @@ class ValrRestConnector:
     # ========== SIMPLE TRADE ENDPOINTS ==========:
 
     def get_simple_trade_quote(
-        self, symbol: str, pay_currency: str, pay_amount: str, side: OrderSide
+        self, symbol: str, pay_currency: str, pay_amount: Decimal, side: OrderSide
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
@@ -443,7 +460,7 @@ class ValrRestConnector:
         return response
 
     def submit_simple_order(
-        self, symbol: str, pay_currency: str, pay_amount: str, side: OrderSide
+        self, symbol: str, pay_currency: str, pay_amount: Decimal, side: OrderSide
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
@@ -469,7 +486,7 @@ class ValrRestConnector:
     def make_new_payment(
         self,
         currency: str,
-        amount: str,
+        amount: Decimal,
         recipient: str,
         recipient_note: Optional[str] = None,
         sender_note: Optional[str] = None,
@@ -542,8 +559,8 @@ class ValrRestConnector:
         self,
         symbol: str,
         side: OrderSide,
-        quantity: str,
-        price: str,
+        quantity: Decimal,
+        price: Decimal,
         post_only: Optional[bool] = None,
         client_order_id: Optional[int] = None,
         time_in_force: TimeInForce = TimeInForce.GTC,
@@ -568,7 +585,7 @@ class ValrRestConnector:
         self,
         symbol: str,
         side: OrderSide,
-        quantity: str,
+        quantity: Decimal,
         client_order_id: Optional[int] = None,
     ) -> dict:
         params = {
@@ -588,9 +605,9 @@ class ValrRestConnector:
         self,
         symbol: str,
         side: OrderSide,
-        quantity: str,
-        price: str,
-        trigger_price: str,
+        quantity: Decimal,
+        price: Decimal,
+        trigger_price: Decimal,
         order_type: TriggerOrderType,
         client_order_id: Optional[int] = None,
         time_in_force: TimeInForce = TimeInForce.GTC,

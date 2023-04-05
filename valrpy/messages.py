@@ -10,6 +10,8 @@ from valrpy.utils import parse_to_datetime, parse_to_bool
 __all__ = [
     "AggregatedOrderbookData",
     "FullOrderbookData",
+    "CurrencyInfo",
+    "CurrencyPairInfo",
     "MarketSummaryData",
     "TradeBucketData",
     "NewTradeData",
@@ -640,3 +642,20 @@ class RawMessage(TypedDict):
 
     type: WebsocketMessageType
     data: Optional[dict | list]
+
+
+@dataclass
+class PairOrderTypes:
+    """
+    order-types available on a pair.
+    """
+
+    currency_pair: str
+    order_types: List[OrderType]
+
+    @classmethod
+    def from_raw(cls, raw: dict) -> "PairOrderTypes":
+        return cls(
+            currency_pair=raw["currencyPair"],
+            order_types=[OrderType(raw_type.upper()) for raw_type in raw["orderTypes"]],
+        )

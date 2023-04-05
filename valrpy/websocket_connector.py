@@ -46,7 +46,7 @@ class WebsocketPipeline(Generic[T]):
         queue: Queue[T],
         headers: Dict[str, str],
         opening_messages: List[dict],
-        message_formatter: Optional[Callable[[dict], Optional[T]]] = None,
+        message_formatter: Optional[Callable[[dict], Optional[T]]],
     ) -> None:
         self.queue = queue
         # we use lambdas when passing in the on_something functions because the WebsocketApp expects
@@ -188,7 +188,8 @@ class ValrWebsocketConnector:
             opening_messages=[],
         )
 
-    def _message_handler(self, message: dict) -> Optional[ParsedMessage]:
+    @staticmethod
+    def _message_handler(message: dict) -> Optional[ParsedMessage]:
         raw_message_type = message.get("type")
         if raw_message_type is None:
             raise ValueError(f"Message has no type: {message}")
@@ -196,14 +197,7 @@ class ValrWebsocketConnector:
         message_type = WebsocketMessageType(raw_message_type)
 
         # nothing needs to be done for these types of messages:
-        if message_type in (
-            WebsocketMessageType.AUTHENTICATED,
-            WebsocketMessageType.PING,
-            WebsocketMessageType.PONG,
-            WebsocketMessageType.SUBSCRIBE,
-            WebsocketMessageType.UNSUBSCRIBE,
-            WebsocketMessageType.NO_SUBSCRIPTIONS,
-        ):
+        if not message_type.has_data():
             return
 
         raw_data = message.get("data")
@@ -314,6 +308,7 @@ class ValrWebsocketConnector:
                 queue=self.queue,
                 headers=headers,
                 opening_messages=opening_messages,
+                message_formatter=self._message_handler,
             )
             pipeline.start()
             self._pipelines[websocket_type] = pipeline

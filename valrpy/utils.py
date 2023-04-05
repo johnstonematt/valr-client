@@ -12,6 +12,7 @@ __all__ = [
     "RestException",
     "enforce_type",
     "parse_to_datetime",
+    "datetime_to_milliseconds",
     "parse_to_bool",
     "request_signature",
     "generate_headers",
@@ -35,7 +36,15 @@ def enforce_type(obj: Any, obj_type: type) -> None:
 
 
 def parse_to_datetime(date_str: str) -> datetime:
-    return datetime.strptime(date_str, DATETIME_FORMAT)
+    # VALR uses millisecond granularity and then appends a 'Z' at the end,
+    # so we remove Z + add '00' to convert to microseconds
+    modified = date_str.rstrip("Z") + "00"
+    return datetime.strptime(modified, DATETIME_FORMAT)
+
+
+def datetime_to_milliseconds(dt: Optional[datetime]) -> Optional[int]:
+    if dt is not None:
+        return int(1e3 * dt.timestamp())
 
 
 def parse_to_bool(raw_bool: Optional[bool | str]) -> Optional[bool]:
