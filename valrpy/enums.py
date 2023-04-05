@@ -7,6 +7,8 @@ __all__ = [
     "OrderSide",
     "TransactionType",
     "TriggerOrderType",
+    "WebsocketType",
+    "WebsocketMessageType",
 ]
 
 
@@ -93,3 +95,72 @@ class OrderInstruction(str, Enum):
     PLACE_LIMIT = "PLACE_LIMIT"
     PLACE_STOP_LIMIT = "PLACE_STOP_LIMIT"
     CANCEL_ORDER = "CANCEL_ORDER"
+
+
+class WebsocketType(str, Enum):
+    """
+    Type of websockets on VALR
+    """
+
+    ACCOUNT = "ACCOUNT"
+    TRADE = "TRADE"
+
+    def path(self) -> str:
+        match self:
+            case WebsocketType.ACCOUNT:
+                return "/ws/account"
+
+            case WebsocketType.TRADE:
+                return "/ws/trade"
+
+            case _:
+                raise NotImplementedError(
+                    f"No path for the following websocket-type: {self}"
+                )
+
+
+class WebsocketMessageType(str, Enum):
+    """
+    Type of websocket messages from VALR
+    """
+
+    # general:
+    AUTHENTICATED = "AUTHENTICATED"
+    PING = "PING"
+    PONG = "PONG"
+    SUBSCRIBE = "SUBSCRIBE"
+    UNSUBSCRIBE = "UNSUBSCRIBE"
+    NO_SUBSCRIPTIONS = "NO_SUBSCRIPTIONS"
+    # account updates:
+    OPEN_ORDERS_UPDATE = "OPEN_ORDERS_UPDATE"
+    BALANCE_UPDATE = "BALANCE_UPDATE"
+    # trade updates:
+    AGGREGATED_ORDERBOOK_UPDATE = "AGGREGATED_ORDERBOOK_UPDATE"
+    FULL_ORDERBOOK_UPDATE = "FULL_ORDERBOOK_UPDATE"
+    MARKET_SUMMARY_UPDATE = "MARKET_SUMMARY_UPDATE"
+    NEW_TRADE_BUCKET = "NEW_TRADE_BUCKET"
+    NEW_TRADE = "NEW_TRADE"
+    MARK_PRICE_UPDATE = "MARK_PRICE_UPDATE"
+
+    def websocket_type(self) -> WebsocketType:
+        match self:
+            case (
+                WebsocketMessageType.OPEN_ORDERS_UPDATE
+                | WebsocketMessageType.BALANCE_UPDATE
+            ):
+                return WebsocketType.ACCOUNT
+
+            case (
+                WebsocketMessageType.AGGREGATED_ORDERBOOK_UPDATE
+                | WebsocketMessageType.FULL_ORDERBOOK_UPDATE
+                | WebsocketMessageType.MARKET_SUMMARY_UPDATE
+                | WebsocketMessageType.NEW_TRADE_BUCKET
+                | WebsocketMessageType.NEW_TRADE
+                | WebsocketMessageType.MARKET_SUMMARY_UPDATE
+            ):
+                return WebsocketType.TRADE
+
+            case _:
+                raise NotImplementedError(
+                    f"No websocket-type for the following message-type: {self}"
+                )
