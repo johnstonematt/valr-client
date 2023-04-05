@@ -7,8 +7,27 @@ from typing import Optional, Dict, List, NoReturn, Generic, TypeVar, Callable
 
 from websocket import WebSocketApp
 
-from valrpy.utils import generate_headers
+from valrpy.utils import generate_headers, enforce_type
 from valrpy.enums import WebsocketType, WebsocketMessageType
+from valrpy.messages import (
+    AggregatedOrderbookData,
+    FullOrderbookData,
+    MarketSummaryData,
+    TradeBucketData,
+    NewTradeData,
+    OpenOrderInfo,
+    BalanceUpdateData,
+    NewAccountHistoryRecordData,
+    NewAccountTradeData,
+    InstantOrderCompletedData,
+    OrderProcessedData,
+    OrderStatusUpdateData,
+    FailedCancelOrderData,
+    NewPendingReceiveData,
+    SendStatusUpdateData,
+    MessageData,
+    ParsedMessage,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,10 +43,10 @@ class WebsocketPipeline(Generic[T]):
     def __init__(
         self,
         url: str,
-        queue: Queue[dict],
+        queue: Queue[T],
         headers: Dict[str, str],
         opening_messages: List[dict],
-        message_formatter: Optional[Callable[[dict], T]] = None,
+        message_formatter: Optional[Callable[[dict], Optional[T]]] = None,
     ) -> None:
         self.queue = queue
         # we use lambdas when passing in the on_something functions because the WebsocketApp expects
@@ -75,7 +94,8 @@ class WebsocketPipeline(Generic[T]):
             logger.exception(e)
             raise
 
-        self.queue.put(formatted_message)
+        if formatted_message is not None:
+            self.queue.put(formatted_message)
 
     def _on_open(self, opening_messages: List[dict]) -> None:
         for message in opening_messages:
@@ -157,7 +177,7 @@ class ValrWebsocketConnector:
         self._api_key = api_key
         self._api_secret = api_secret
         self.base_url = "wss://api.valr.com"
-        self.queue: Queue[dict] = Queue()
+        self.queue: Queue[ParsedMessage] = Queue()
 
         self._pipelines: Dict[WebsocketType, WebsocketPipeline] = {}
         self._pipeline_lock = threading.Lock()
@@ -166,6 +186,86 @@ class ValrWebsocketConnector:
         self._create_and_start_websocket_pipeline(
             websocket_type=WebsocketType.ACCOUNT,
             opening_messages=[],
+        )
+
+    def _message_handler(self, message: dict) -> Optional[ParsedMessage]:
+        raw_message_type = message.get("type")
+        if raw_message_type is None:
+            raise ValueError(f"Message has no type: {message}")
+
+        message_type = WebsocketMessageType(raw_message_type)
+
+        # nothing needs to be done for these types of messages:
+        if message_type in (
+            WebsocketMessageType.AUTHENTICATED,
+            WebsocketMessageType.PING,
+            WebsocketMessageType.PONG,
+            WebsocketMessageType.SUBSCRIBE,
+            WebsocketMessageType.UNSUBSCRIBE,
+            WebsocketMessageType.NO_SUBSCRIPTIONS,
+        ):
+            return
+
+        raw_data = message.get("data")
+        if raw_data is None:
+            raise ValueError(f"No data in the message: {message}")
+
+        data: MessageData
+        match message_type:
+            case WebsocketMessageType.AGGREGATED_ORDERBOOK_UPDATE:
+                data = AggregatedOrderbookData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.FULL_ORDERBOOK_UPDATE:
+                data = FullOrderbookData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.MARKET_SUMMARY_UPDATE:
+                data = MarketSummaryData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.NEW_TRADE_BUCKET:
+                data = TradeBucketData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.NEW_TRADE:
+                data = NewTradeData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.OPEN_ORDERS_UPDATE:
+                enforce_type(obj=raw_data, obj_type=list)
+                data = [OpenOrderInfo.from_raw(raw=raw_order) for raw_order in raw_data]
+
+            case WebsocketMessageType.NEW_ACCOUNT_HISTORY_RECORD:
+                data = NewAccountHistoryRecordData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.BALANCE_UPDATE:
+                data = BalanceUpdateData.from_data(raw=raw_data)
+
+            case WebsocketMessageType.NEW_ACCOUNT_TRADE:
+                data = NewAccountTradeData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.INSTANT_ORDER_COMPLETED:
+                data = InstantOrderCompletedData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.ORDER_PROCESSED:
+                data = OrderProcessedData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.ORDER_STATUS_UPDATE:
+                data = OrderStatusUpdateData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.FAILED_CANCEL_ORDER:
+                data = FailedCancelOrderData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.NEW_PENDING_RECEIVE:
+                data = NewPendingReceiveData.from_raw(raw=raw_data)
+
+            case WebsocketMessageType.SEND_STATUS_UPDATE:
+                data = SendStatusUpdateData.from_raw(raw=raw_data)
+
+            case _:
+                raise NotImplementedError(
+                    f"No implemented data-format for {message_type} message type."
+                )
+
+        return ParsedMessage(
+            type=message_type,
+            data=data,
         )
 
     def subscribe_to_market(

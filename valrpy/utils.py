@@ -2,7 +2,20 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Optional, Dict
+from datetime import datetime
+from typing import Optional, Dict, Any
+
+from valrpy.constants import DATETIME_FORMAT
+
+
+__all__ = [
+    "RestException",
+    "enforce_type",
+    "parse_to_datetime",
+    "parse_to_bool",
+    "request_signature",
+    "generate_headers",
+]
 
 
 class RestException(Exception):
@@ -11,6 +24,31 @@ class RestException(Exception):
     """
 
     pass
+
+
+def enforce_type(obj: Any, obj_type: type) -> None:
+    if not isinstance(obj, obj_type):
+        raise TypeError(
+            f"Expected obj to be of type {obj_type.__name__} but instead received "
+            f"{type(obj).__name__}: {obj}"
+        )
+
+
+def parse_to_datetime(date_str: str) -> datetime:
+    return datetime.strptime(date_str, DATETIME_FORMAT)
+
+
+def parse_to_bool(raw_bool: Optional[bool | str]) -> Optional[bool]:
+    if isinstance(raw_bool, bool):
+        return raw_bool
+
+    if isinstance(raw_bool, str):
+        return raw_bool.lower() == "true"
+
+    if raw_bool is None:
+        return
+
+    raise TypeError(f"Can't parse type {type(raw_bool).__name__} to bool.")
 
 
 def request_signature(
