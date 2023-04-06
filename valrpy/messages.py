@@ -69,6 +69,14 @@ def _parse_to_desired_type(
     desired_type: Type[T],
 ) -> T:
     type_name = str(desired_type)
+    # check that the param is present:
+    if obj is None and not type_name.startswith("typing.Optional"):
+        raise TypeError(f"Expected type {type_name}, but received None.")
+
+    # handle 'Any' case:
+    if type_name == Any:
+        return obj
+
     if "[" in type_name:
         # this occurs with nested typing, i.e., str(List[Any]) == typing.List[typing.Any]
         outer_type_name = type_name.split("[")[0]
@@ -101,6 +109,11 @@ def _parse_to_desired_type(
     if isinstance(obj, desired_type):
         return obj
 
+    # this is to avoid float inaccuracy such as
+    # Decimal(0.0001) = 0.000100000000000000004792173602385929598312941379845142364501953125
+    if issubclass(desired_type, Decimal):
+        return Decimal(str(obj))
+
     if issubclass(desired_type, bool):
         if isinstance(obj, str):
             return obj.lower() == "true"
@@ -111,12 +124,25 @@ def _parse_to_desired_type(
             )
 
     if issubclass(desired_type, datetime):
-        if isinstance(desired_type, (int, float)):
+        if isinstance(obj, (int, float)):
             return datetime.fromtimestamp(obj, tz=TIMEZONE)
 
-        elif isinstance(desired_type, str):
-            modified = obj.rstrip("Z") + "00"
-            return datetime.strptime(modified, DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
+        elif isinstance(obj, str):
+            # there is a possibility that a timestamp is still given, but just in string format:
+            if obj.isdecimal():
+                return datetime.fromtimestamp(float(obj), tz=TIMEZONE)
+
+            # VALR includes a 'Z' at the end of their datetime strings:
+            obj = obj.rstrip("Z")
+
+            # this is a strange case where sometimes a datetime will come through like '2023-04-05T14:32:5100',
+            # and presumably the last 4 characters mean 51 seconds
+            if len(obj) == 21:
+                return datetime.strptime(obj[:-2], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=TIMEZONE)
+
+            # VALR typically uses millisecond granularity and then appends a 'Z' at the end,
+            # so we remove Z + add '000' to convert to microseconds
+            return datetime.strptime(obj + "000", DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
 
         else:
             raise TypeError(
