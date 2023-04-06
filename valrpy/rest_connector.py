@@ -293,7 +293,7 @@ class ValrRestConnector:
             "fromId": from_id,
             "toId": to_id,
             "currencyCode": symbol,
-            "amount": amount,
+            "amount": str(amount),
         }
         response = self._post(
             endpoint="account/subaccounts/transfer",
@@ -385,7 +385,7 @@ class ValrRestConnector:
         self, currency: str, amount: Decimal, address: str
     ) -> str:
         params = {
-            "amount": amount,
+            "amount": str(amount),
             "address": address,
         }
         response = self._post(
@@ -453,7 +453,7 @@ class ValrRestConnector:
         self, currency: str, amount: Decimal, bank_account_id: str, fast: bool
     ) -> str:
         params = {
-            "amount": amount,
+            "amount": str(amount),
             "linkedBankAccountId": bank_account_id,
             "fast": fast,
         }
@@ -490,7 +490,7 @@ class ValrRestConnector:
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
-            "payAmount": pay_amount,
+            "payAmount": str(pay_amount),
             "side": side,
         }
         response = self._post(
@@ -505,7 +505,7 @@ class ValrRestConnector:
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
-            "payAmount": pay_amount,
+            "payAmount": str(pay_amount),
             "side": side,
         }
         response = self._post(
@@ -542,7 +542,7 @@ class ValrRestConnector:
         )
         params = {
             "currency": currency,
-            "amount": amount,
+            "amount": str(amount),
             recipient_tag: recipient,
             "recipientNote": recipient_note,
             "senderNote": sender_note,
@@ -608,8 +608,8 @@ class ValrRestConnector:
     ) -> dict:
         params = {
             "side": side,
-            "quantity": quantity,
-            "price": price,
+            "quantity": str(quantity),
+            "price": str(price),
             "pair": symbol,
             "postOnly": post_only,
             "customerOrderId": client_order_id,
@@ -632,7 +632,7 @@ class ValrRestConnector:
         params = {
             "pair": symbol,
             "side": side,
-            "quantity": quantity,
+            "quantity": str(quantity),
             "customerOrderId": client_order_id,
         }
         response = self._post(
@@ -656,9 +656,9 @@ class ValrRestConnector:
         params = {
             "pair": symbol,
             "side": side,
-            "quantity": quantity,
-            "price": price,
-            "stopPrice": trigger_price,
+            "quantity": str(quantity),
+            "price": str(price),
+            "stopPrice": str(trigger_price),
             "type": order_type,
             "customerOrderId": client_order_id,
             "timeInForce": time_in_force,
