@@ -55,7 +55,7 @@ class WebsocketPipeline(Generic[T]):
             url=url,
             header=headers,
             on_open=lambda ws: self._on_open(opening_messages=opening_messages),
-            on_error=lambda ws: self._on_error(),
+            on_error=self._on_error,
             on_message=lambda ws, message: self._on_message(message=message),
             on_close=self._on_close,
         )
@@ -101,7 +101,7 @@ class WebsocketPipeline(Generic[T]):
         for message in opening_messages:
             self.send_message(message=message)
 
-    def _on_error(self) -> None:
+    def _on_error(self, ws: WebSocketApp, e: Exception) -> None:
         pass
 
     def _on_close(self, ws: WebSocketApp) -> None:

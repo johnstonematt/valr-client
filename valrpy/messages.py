@@ -1,10 +1,21 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 from dataclasses import dataclass
-from typing import List, Optional, TypeAlias, TypedDict
+from typing import (
+    List,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Any,
+    TypeVar,
+    get_type_hints,
+    Type,
+    Dict,
+)
 
+from valrpy.constants import TIMEZONE, DATETIME_FORMAT
 from valrpy.enums import OrderSide, TransactionType, OrderType, WebsocketMessageType
-from valrpy.utils import parse_to_datetime, parse_to_bool
 
 
 __all__ = [
@@ -29,11 +40,153 @@ __all__ = [
     "MessageData",
     "ParsedMessage",
     "RawMessage",
+    "PairOrderTypes",
+    "HistoricalMarketTrade",
+    "ServerTime",
+    "ApiKeyInfo",
+    "SubaccountInfo",
+    "BalanceSummary",
+    "SubaccountBalance",
+    "WalletBalance",
+    "HistoricalAccountTrade",
+    "WhitelistedAddress",
+    "CurrencyWithdrawalInfo",
+    "WithdrawalStatus",
+    "HistoricalDeposit",
+    "HistoricalWithdrawal",
+    "BankAccountDetail",
+    "BankAccountInfo",
+    "BankInfo",
 ]
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _parse_to_desired_type(
+    obj: Any,
+    desired_type: Type[T],
+) -> T:
+    type_name = str(desired_type)
+    if "[" in type_name:
+        # this occurs with nested typing, i.e., str(List[Any]) == typing.List[typing.Any]
+        outer_type_name = type_name.split("[")[0]
+        # find the name of the class: 'typing.List' -> 'List'
+        outer_type_name = outer_type_name.split(".")[-1]
+        inner_types = desired_type.__args__
+        if "Optional" in outer_type_name:
+            if obj is None:
+                return None
+            else:
+                result = _parse_to_desired_type(
+                    obj=obj,
+                    desired_type=inner_types[0],
+                )
+                return result
+
+        if "list" in outer_type_name.lower():
+            result = [
+                _parse_to_desired_type(
+                    obj=item,
+                    desired_type=inner_types[0],
+                )
+                for item in obj
+            ]
+            return result
+
+        raise TypeError(f"Unimplemented desired type: {type_name}")
+
+    # now that we have handled generics, we can do the straight check:
+    if isinstance(obj, desired_type):
+        return obj
+
+    if issubclass(desired_type, bool):
+        if isinstance(obj, str):
+            return obj.lower() == "true"
+
+        else:
+            raise TypeError(
+                f"Can't convert object of type {type(obj).__name__} to bool."
+            )
+
+    if issubclass(desired_type, datetime):
+        if isinstance(desired_type, (int, float)):
+            return datetime.fromtimestamp(obj, tz=TIMEZONE)
+
+        elif isinstance(desired_type, str):
+            modified = obj.rstrip("Z") + "00"
+            return datetime.strptime(modified, DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
+
+        else:
+            raise TypeError(
+                f"Can't convert object of type {type(obj).__name__} to datetime."
+            )
+
+    if issubclass(desired_type, MessageElement):
+        if isinstance(obj, dict):
+            return desired_type.from_raw(raw=obj)
+
+        else:
+            raise TypeError(
+                f"Can't convert object of type {type(obj).__name__} to {desired_type.__name__}."
+            )
+
+    # this shouldn't run:
+    raise TypeError(
+        f"Unimplemented case of converting {type(obj).__name__} to {desired_type.__name__}."
+    )
+
+
+def _convert_to_snake_case(camel_case: str) -> str:
+    if camel_case.islower():
+        return camel_case
+
+    snake_case = ""
+    for character in camel_case:
+        if character.isalpha() and character.isupper():
+            snake_case += f"_{character.lower()}"
+
+        else:
+            snake_case += character
+
+    return snake_case.lstrip("_")
+
+
+def _apply_snake_case(camel_dict: Dict[str, Any]) -> Dict[str, Any]:
+    snake_case_dict = {}
+    for key, val in camel_dict.items():
+        snake_key = _convert_to_snake_case(camel_case=key)
+        snake_val = _apply_snake_case(camel_dict=val) if isinstance(val, dict) else val
+        snake_case_dict[snake_key] = snake_val
+
+    return snake_case_dict
+
+
+class MessageElement:
+    @classmethod
+    def from_raw(cls: Type["U"], raw: dict) -> "U":
+        type_hints = get_type_hints(cls.__init__)
+        if "return" in type_hints:
+            type_hints.pop("return")
+
+        raw = _apply_snake_case(camel_dict=raw)
+
+        parsed_kwargs = {}
+        for param_name, desired_type in type_hints.items():
+            parsed_kwargs[param_name] = _parse_to_desired_type(
+                obj=raw.get(param_name),
+                desired_type=desired_type,
+            )
+
+        return cls(**parsed_kwargs)
+
+
+U = TypeVar("U", bound=MessageElement)
 
 
 @dataclass
-class AggregatedOrderbookLevel:
+class AggregatedOrderbookLevel(MessageElement):
     """
     Single level of an aggregated orderbook.
     """
@@ -44,19 +197,9 @@ class AggregatedOrderbookLevel:
     currency_pair: str
     order_count: int
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "AggregatedOrderbookLevel":
-        return cls(
-            side=OrderSide(raw["side"].upper()),
-            quantity=Decimal(raw["quantity"]),
-            price=Decimal(raw["price"]),
-            currency_pair=raw["currencyPair"],
-            order_count=raw["orderCount"],
-        )
-
 
 @dataclass
-class AggregatedOrderbookData:
+class AggregatedOrderbookData(MessageElement):
     """
     Aggregated orderbook.
     """
@@ -66,22 +209,9 @@ class AggregatedOrderbookData:
     last_change: datetime
     sequence_number: int
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "AggregatedOrderbookData":
-        return cls(
-            asks=[
-                AggregatedOrderbookLevel.from_raw(raw=level) for level in raw["Asks"]
-            ],
-            bids=[
-                AggregatedOrderbookLevel.from_raw(raw=level) for level in raw["Bids"]
-            ],
-            last_change=parse_to_datetime(date_str=raw["LastChange"]),
-            sequence_number=int(raw["SequenceNumber"]),
-        )
-
 
 @dataclass
-class OrderbookOrder:
+class OrderbookOrder(MessageElement):
     """
     Order-summary in an orderbook.
     """
@@ -89,16 +219,9 @@ class OrderbookOrder:
     order_id: str
     quantity: Decimal
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "OrderbookOrder":
-        return OrderbookOrder(
-            order_id=raw["orderId"],
-            quantity=Decimal(raw["quantity"]),
-        )
-
 
 @dataclass
-class OrderbookLevel:
+class OrderbookLevel(MessageElement):
     """
     Orderbook-level in an orderbook.
     """
@@ -106,16 +229,9 @@ class OrderbookLevel:
     price: Decimal
     orders: List[OrderbookOrder]
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "OrderbookLevel":
-        return OrderbookLevel(
-            price=Decimal(raw["price"]),
-            orders=[OrderbookOrder.from_raw(raw=order) for order in raw["orders"]],
-        )
-
 
 @dataclass
-class FullOrderbookData:
+class FullOrderbookData(MessageElement):
     """
     Data-format for full orderbook (snapshot + update).
     """
@@ -126,19 +242,9 @@ class FullOrderbookData:
     sequence_number: int
     checksum: int
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "FullOrderbookData":
-        return cls(
-            last_change=int(raw["lastChange"]),
-            asks=[OrderbookLevel.from_raw(raw=level) for level in raw["Asks"]],
-            bids=[OrderbookLevel.from_raw(raw=level) for level in raw["Bids"]],
-            sequence_number=int(raw["sequenceNumber"]),
-            checksum=int(raw["checksum"]),
-        )
-
 
 @dataclass
-class MarketSummaryData:
+class MarketSummaryData(MessageElement):
     """
     Data-format for market summary.
     """
@@ -155,25 +261,9 @@ class MarketSummaryData:
     change_from_previous: Decimal
     mark_price: Decimal
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "MarketSummaryData":
-        return cls(
-            currency_pair=raw["currencyPair"],
-            ask_price=Decimal(raw["askPrice"]),
-            bid_price=Decimal(raw["bidPrice"]),
-            last_traded_price=Decimal(raw["lastTradedPrice"]),
-            previous_close_price=Decimal(raw["previousClosePrice"]),
-            base_volume=Decimal(raw["baseVolume"]),
-            high_price=Decimal(raw["highPrice"]),
-            low_price=Decimal(raw["lowPrice"]),
-            created_at=parse_to_datetime(date_str=raw["createdAt"]),
-            change_from_previous=Decimal(raw["changeFromPrevious"]),
-            mark_price=Decimal(raw["markPrice"]),
-        )
-
 
 @dataclass
-class TradeBucketData:
+class TradeBucketData(MessageElement):
     """
     data-format for trade bucket
     """
@@ -187,22 +277,9 @@ class TradeBucketData:
     close: Decimal
     volume: Decimal
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "TradeBucketData":
-        return cls(
-            currency_pair_symbol=raw["currencyPairSymbol"],
-            bucket_period_in_seconds=int(raw["bucketPeriodInSeconds"]),
-            start_time=parse_to_datetime(date_str=raw["startTime"]),
-            open=Decimal(raw["open"]),
-            high=Decimal(raw["high"]),
-            low=Decimal(raw["low"]),
-            close=Decimal(raw["close"]),
-            volume=Decimal(raw["volume"]),
-        )
-
 
 @dataclass
-class CurrencyInfo:
+class CurrencyInfo(MessageElement):
     """
     data-format for currency info
     """
@@ -217,25 +294,9 @@ class CurrencyInfo:
     collateral_weight: Optional[Decimal]
     id: Optional[int]
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "CurrencyInfo":
-        return cls(
-            symbol=raw["symbol"],
-            decimal_places=int(raw["decimalPlaces"]),
-            is_active=parse_to_bool(raw_bool=raw["isActive"]),
-            short_name=raw["shortName"],
-            long_name=raw["longName"],
-            supported_withdraw_decimal_places=int(
-                raw["supportedWithdrawDecimalPlaces"]
-            ),
-            collateral=parse_to_bool(raw_bool=raw.get("collateral")),
-            collateral_weight=parse_to_bool(raw_bool=raw.get("collateralWeight")),
-            id=int(raw["id"]) if "id" in raw else None,
-        )
-
 
 @dataclass
-class CurrencyPairInfo:
+class CurrencyPairInfo(MessageElement):
     """
     data-format for currency-pair info
     """
@@ -252,25 +313,9 @@ class CurrencyPairInfo:
     min_quote_amount: Decimal
     max_quote_amount: Decimal
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "CurrencyPairInfo":
-        return cls(
-            id=int(raw["id"]),
-            symbol=raw["symbol"],
-            base_currency=CurrencyInfo.from_raw(raw=raw["baseCurrency"]),
-            quote_currency=CurrencyInfo.from_raw(raw=raw["quoteCurrency"]),
-            short_name=raw["shortName"],
-            exchange=raw["exchange"],
-            active=parse_to_bool(raw_bool=raw["active"]),
-            min_base_amount=Decimal(raw["minBaseAmount"]),
-            min_quote_amount=Decimal(raw["minQuoteAmount"]),
-            max_base_amount=Decimal(raw["maxBaseAmount"]),
-            max_quote_amount=Decimal(raw["maxQuoteAmount"]),
-        )
-
 
 @dataclass
-class NewTradeData:
+class NewTradeData(MessageElement):
     """
     data-format for new trade.
     """
@@ -281,19 +326,9 @@ class NewTradeData:
     traded_at: datetime
     taker_side: OrderSide
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "NewTradeData":
-        return cls(
-            price=Decimal(raw["price"]),
-            quantity=Decimal(raw["quantity"]),
-            currency_pair=CurrencyPairInfo.from_raw(raw=raw["currencyPair"]),
-            traded_at=parse_to_datetime(date_str=raw["tradedAt"]),
-            taker_side=OrderSide(raw["takerSide"].upper()),
-        )
-
 
 @dataclass
-class OpenOrderInfo:
+class OpenOrderInfo(MessageElement):
     """
     data-format for open order update
     """
@@ -308,26 +343,12 @@ class OpenOrderInfo:
     filled_percentage: Decimal
     customer_order_id: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "OpenOrderInfo":
-        return cls(
-            order_id=raw["orderId"],
-            side=OrderSide(raw["orderSide"].upper()),
-            remaining_quantity=Decimal(raw["remainingQuantity"]),
-            original_price=Decimal(raw["originalPrice"]),
-            currency_pair=CurrencyPairInfo.from_raw(raw=raw["currencyPair"]),
-            created_at=parse_to_datetime(date_str=raw["createdAt"]),
-            original_quantity=Decimal(raw["originalQuantity"]),
-            filled_percentage=Decimal(raw["filledPercentage"]),
-            customer_order_id=raw["customerOrderId"],
-        )
-
 
 OpenOrdersUpdateData: TypeAlias = List[OpenOrderInfo]
 
 
 @dataclass
-class BalanceUpdateData:
+class BalanceUpdateData(MessageElement):
     """
     data-format for balance update
     """
@@ -341,22 +362,9 @@ class BalanceUpdateData:
     borrow_collateral_reserved: Decimal
     borrowed_amount: Decimal
 
-    @classmethod
-    def from_data(cls, raw: dict) -> "BalanceUpdateData":
-        return cls(
-            currency=CurrencyInfo.from_raw(raw=raw["currency"]),
-            available=Decimal(raw["available"]),
-            reserved=Decimal(raw["reserved"]),
-            total=Decimal(raw["total"]),
-            updated_at=parse_to_datetime(date_str=raw["updatedAt"]),
-            lend_reserved=Decimal(raw["lendReserved"]),
-            borrow_collateral_reserved=Decimal(raw["borrowCollateralReserved"]),
-            borrowed_amount=Decimal(raw["borrowedAmount"]),
-        )
-
 
 @dataclass
-class TransactionTypeInfo:
+class TransactionTypeInfo(MessageElement):
     """
     data-format for transaction-type info.
     """
@@ -364,16 +372,9 @@ class TransactionTypeInfo:
     type: TransactionType
     description: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "TransactionTypeInfo":
-        return cls(
-            type=TransactionType(raw["type"].upper()),
-            description=raw["description"],
-        )
-
 
 @dataclass
-class HistoryRecordAdditionalInfo:
+class HistoryRecordAdditionalInfo(MessageElement):
     """
     Additional info.
     """
@@ -383,18 +384,9 @@ class HistoryRecordAdditionalInfo:
     currency_pair_symbol: str
     order_id: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "HistoryRecordAdditionalInfo":
-        return cls(
-            cost_per_coin=Decimal(raw["costPerCoin"]),
-            cost_per_coin_symbol=raw["costPerCoinSymbol"],
-            currency_pair_symbol=raw["currencyPairSymbol"],
-            order_id=raw["orderId"],
-        )
-
 
 @dataclass
-class NewAccountHistoryRecordData:
+class NewAccountHistoryRecordData(MessageElement):
     """
     data-format for a new account history record.
     """
@@ -410,26 +402,9 @@ class NewAccountHistoryRecordData:
     additional_info: HistoryRecordAdditionalInfo
     id: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "NewAccountHistoryRecordData":
-        return cls(
-            transaction_type=TransactionTypeInfo.from_raw(raw=raw["transactionType"]),
-            debit_currency=CurrencyInfo.from_raw(raw=raw["debitCurrency"]),
-            debit_value=Decimal(raw["debitValue"]),
-            credit_currency=CurrencyInfo.from_raw(raw=raw["creditCurrency"]),
-            credit_value=Decimal(raw["creditValue"]),
-            fee_currency=CurrencyInfo.from_raw(raw=raw["feeCurrency"]),
-            fee_value=Decimal(raw["feeValue"]),
-            event_at=parse_to_datetime(date_str=raw["eventAt"]),
-            additional_info=HistoryRecordAdditionalInfo.from_raw(
-                raw=raw["additionalInfo"]
-            ),
-            id=raw["id"],
-        )
-
 
 @dataclass
-class NewAccountTradeData:
+class NewAccountTradeData(MessageElement):
     """
     data-format for a new account trade.
     """
@@ -442,21 +417,9 @@ class NewAccountTradeData:
     order_id: str
     id: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "NewAccountTradeData":
-        return cls(
-            price=Decimal(raw["price"]),
-            quantity=Decimal(raw["quantity"]),
-            currency_pair=raw["currencyPair"],
-            traded_at=parse_to_datetime(date_str=raw["tradedAt"]),
-            side=OrderSide(raw["side"].upper()),
-            order_id=raw["orderId"],
-            id=raw["id"],
-        )
-
 
 @dataclass
-class InstantOrderCompletedData:
+class InstantOrderCompletedData(MessageElement):
     """
     data-format for instant order completed info.
     """
@@ -471,23 +434,9 @@ class InstantOrderCompletedData:
     fee_currency: str
     order_executed_at: datetime
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "InstantOrderCompletedData":
-        return cls(
-            order_id=raw["orderId"],
-            success=parse_to_bool(raw_bool=raw["success"]),
-            paid_amount=Decimal(raw["paidAmount"]),
-            paid_currency=Decimal(raw["paidCurrency"]),
-            received_amount=Decimal(raw["receivedAmount"]),
-            received_currency=raw["receivedCurrency"],
-            fee_amount=Decimal(raw["feeAmount"]),
-            fee_currency=raw["feeCurrency"],
-            order_executed_at=parse_to_datetime(date_str=raw["orderExecutedAt"]),
-        )
-
 
 @dataclass
-class OrderProcessedData:
+class OrderProcessedData(MessageElement):
     """
     data-format for order-processed info.
     """
@@ -496,17 +445,9 @@ class OrderProcessedData:
     success: bool
     failure_reason: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "OrderProcessedData":
-        return cls(
-            order_id=raw["orderId"],
-            success=parse_to_bool(raw_bool=raw["success"]),
-            failure_reason=raw["failureReason"],
-        )
-
 
 @dataclass
-class OrderStatusUpdateData:
+class OrderStatusUpdateData(MessageElement):
     """
     data-format for an order-status update.
     """
@@ -524,26 +465,9 @@ class OrderStatusUpdateData:
     order_created_at: datetime
     customer_order_id: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "OrderStatusUpdateData":
-        return cls(
-            order_id=raw["orderId"],
-            order_status_type=raw["orderStatusType"],
-            currency_pair=CurrencyPairInfo.from_raw(raw=raw["currencyPair"]),
-            original_price=Decimal(raw["originalPrice"]),
-            remaining_quantity=Decimal(raw["remainingQuantity"]),
-            original_quantity=Decimal(raw["originalQuantity"]),
-            order_side=OrderSide(raw["orderSide"].upper()),
-            order_type=OrderType(raw["orderType"].upper()),
-            failed_reason=raw["failedReason"],
-            order_updated_at=parse_to_datetime(date_str=raw["orderUpdatedAt"]),
-            order_created_at=parse_to_datetime(date_str=raw["orderCreatedAt"]),
-            customer_order_id=raw["customerOrderId"],
-        )
-
 
 @dataclass
-class FailedCancelOrderData:
+class FailedCancelOrderData(MessageElement):
     """
     data-format for a failed cancel order.
     """
@@ -551,16 +475,9 @@ class FailedCancelOrderData:
     order_id: str
     message: str
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "FailedCancelOrderData":
-        return cls(
-            order_id=raw["orderId"],
-            message=raw["message"],
-        )
-
 
 @dataclass
-class NewPendingReceiveData:
+class NewPendingReceiveData(MessageElement):
     """
     data-format for info regarding a new pending deposit.
     """
@@ -573,21 +490,9 @@ class NewPendingReceiveData:
     confirmations: int
     confirmed: bool
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "NewPendingReceiveData":
-        return cls(
-            currency=CurrencyInfo.from_raw(raw=raw["currency"]),
-            receive_address=raw["receiveAddress"],
-            transaction_hash=raw["transactionHash"],
-            amount=Decimal(raw["amount"]),
-            created_at=parse_to_datetime(date_str=raw["createdAt"]),
-            confirmations=int(raw["confirmations"]),
-            confirmed=parse_to_bool(raw_bool=raw["confirmed"]),
-        )
-
 
 @dataclass
-class SendStatusUpdateData:
+class SendStatusUpdateData(MessageElement):
     """
     data-format for info regarding a crypto withdrawal status update
     """
@@ -595,14 +500,6 @@ class SendStatusUpdateData:
     unique_id: str
     status: str
     confirmations: int
-
-    @classmethod
-    def from_raw(cls, raw: dict) -> "SendStatusUpdateData":
-        return cls(
-            unique_id=raw["uniqueId"],
-            status=raw["status"],
-            confirmations=int(raw["confirmations"]),
-        )
 
 
 MessageData: TypeAlias = (
@@ -626,7 +523,7 @@ MessageData: TypeAlias = (
 
 
 @dataclass
-class ParsedMessage:
+class ParsedMessage(MessageElement):
     """
     A parsed websocket message.
     """
@@ -645,7 +542,7 @@ class RawMessage(TypedDict):
 
 
 @dataclass
-class PairOrderTypes:
+class PairOrderTypes(MessageElement):
     """
     order-types available on a pair.
     """
@@ -653,9 +550,260 @@ class PairOrderTypes:
     currency_pair: str
     order_types: List[OrderType]
 
-    @classmethod
-    def from_raw(cls, raw: dict) -> "PairOrderTypes":
-        return cls(
-            currency_pair=raw["currencyPair"],
-            order_types=[OrderType(raw_type.upper()) for raw_type in raw["orderTypes"]],
-        )
+
+@dataclass
+class HistoricalMarketTrade(MessageElement):
+    """
+    Response format for historical trades.
+    """
+
+    price: Decimal
+    quantity: Decimal
+    currency_pair: str
+    traded_at: datetime
+    taker_side: OrderSide
+    sequence_id: int
+    id: str
+    quote_volume: Decimal
+
+
+@dataclass
+class ServerTime(MessageElement):
+    """
+    Server-time info.
+    """
+
+    epoch_time: int
+    time: datetime
+
+
+@dataclass
+class WithdrawalAddress(MessageElement):
+    """
+    Withdrawal address.
+    """
+
+    currency: str
+    address: str
+
+
+@dataclass
+class ApiKeyInfo(MessageElement):
+    """
+    Api key info.
+    """
+
+    label: str
+    permissions: List[str]
+    added_at: datetime
+    allowed_ip_address_cidr: str
+    allowed_withdraw_address_list: List[WithdrawalAddress]
+
+
+@dataclass
+class SubaccountInfo(MessageElement):
+    """
+    Subaccount info.
+    """
+
+    label: str
+    id: int
+
+
+@dataclass
+class BalanceSummary(MessageElement):
+    """
+    balance summary.
+    """
+
+    currency: str
+    available: Decimal
+    reserved: Decimal
+    total: Decimal
+    updated_at: datetime
+
+
+@dataclass
+class SubaccountBalance(MessageElement):
+    """
+    Subaccount balance.
+    """
+
+    account: SubaccountInfo
+    balances: List[BalanceSummary]
+
+
+@dataclass
+class WalletBalance(MessageElement):
+    """
+    Wallet balance.
+    """
+
+    currency: str
+    available: Decimal
+    reserved: Decimal
+    total: Decimal
+    updated_at: datetime
+    lend_reserved: Decimal
+    borrow_reserved: Decimal
+    borrowed_amount: Decimal
+
+
+@dataclass
+class HistoricalAccountTrade(MessageElement):
+    """
+    Response format for historical account trades.
+    """
+
+    price: Decimal
+    quantity: Decimal
+    currency_pair: str
+    traded_at: datetime
+    side: OrderSide
+    sequence_id: int
+    id: str
+    order_id: str
+
+
+@dataclass
+class WhitelistedAddress(MessageElement):
+    """
+    whitelisted address
+    """
+
+    id: str
+    label: str
+    currency: str
+    address: str
+    created_at: datetime
+
+
+@dataclass
+class CurrencyWithdrawalInfo(MessageElement):
+    """
+    Withdrawal info
+    """
+
+    currency: str
+    minimum_withdraw_amount: Decimal
+    withdrawal_decimal_places: int
+    is_active: bool
+    withdraw_cost: Decimal
+    supports_payment_reference: bool
+
+
+@dataclass
+class WithdrawalStatus(MessageElement):
+    """
+    Withdrawal status
+    """
+
+    currency: str
+    address: str
+    amount: Decimal
+    fee_amount: Decimal
+    transaction_hash: str
+    confirmations: int
+    last_confirmation_at: datetime
+    unique_id: str
+    created_at: datetime
+    verified: bool
+    status: str
+
+
+@dataclass
+class HistoricalDeposit(MessageElement):
+    """
+    Historical deposit.
+    """
+
+    currency_code: str
+    receive_address: str
+    transaction_hash: str
+    amount: Decimal
+    created_at: datetime
+    confirmations: int
+    confirmed: bool
+    confirmed_at: Optional[datetime]
+
+
+@dataclass
+class HistoricalWithdrawal(MessageElement):
+    """
+    Withdrawal.
+    """
+
+    currency: str
+    address: str
+    amount: Decimal
+    fee_amount: Decimal
+    confirmations: int
+    last_confirmation_at: Optional[datetime]
+    unique_id: str
+    created_at: datetime
+    verified: bool
+    status: str
+
+
+@dataclass
+class BankAccountInfo(MessageElement):
+    """
+    Bank account info.
+    """
+
+    id: str
+    bank_code: str
+    bank_name: str
+    account_holder: str
+    account_number: str
+    branch_code: str
+    account_type: str
+    status: str
+    inserted_at: datetime
+    updated_at: datetime
+    country: str
+    currency: Optional[CurrencyInfo]
+
+
+@dataclass
+class BankAccountDetail(MessageElement):
+    """
+    Details regarding a bank account
+    """
+
+    id: str
+    bank: str
+    account_holder: str
+    account_number: str
+    branch_code: str
+    account_type: str
+    created_at: datetime
+    country: str
+
+
+@dataclass
+class BankInfo(MessageElement):
+    """
+    Info regarding a bank.
+    """
+
+    code: str
+    display_name: str
+    default_branch_code: str
+    rtc_participant: bool
+    rtgs_participant: bool
+    country_code: str
+
+
+@dataclass
+class WireWithdrawal(MessageElement):
+    """
+    Wire withdrawal info.
+    """
+
+    id: str
+    currency: str
+    amount: Decimal
+    status: str
+    created_at: datetime
+    wire_bank_account_id: str

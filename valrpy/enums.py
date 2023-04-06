@@ -9,6 +9,7 @@ __all__ = [
     "TriggerOrderType",
     "WebsocketType",
     "WebsocketMessageType",
+    "ExchangeStatus",
 ]
 
 
@@ -203,3 +204,12 @@ class WebsocketMessageType(BaseStrEnum):
                 raise NotImplementedError(
                     f"No websocket-type for the following message-type: {self}"
                 )
+
+
+class ExchangeStatus(BaseStrEnum):
+    """
+    Exchange status.
+    """
+
+    ONLINE = "ONLINE"
+    READ_ONLY = "READ_ONLY"

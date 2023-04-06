@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from valrpy.constants import DATETIME_FORMAT
+from valrpy.constants import DATETIME_FORMAT, TIMEZONE
 
 
 __all__ = [
@@ -39,7 +39,7 @@ def parse_to_datetime(date_str: str) -> datetime:
     # VALR uses millisecond granularity and then appends a 'Z' at the end,
     # so we remove Z + add '00' to convert to microseconds
     modified = date_str.rstrip("Z") + "00"
-    return datetime.strptime(modified, DATETIME_FORMAT)
+    return datetime.strptime(modified, DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
 
 
 def datetime_to_milliseconds(dt: Optional[datetime]) -> Optional[int]:

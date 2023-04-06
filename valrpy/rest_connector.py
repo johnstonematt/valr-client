@@ -8,8 +8,10 @@ from requests import Session, Request
 from valrpy.enums import (
     TransactionType,
     OrderSide,
+    OrderType,
     TimeInForce,
     TriggerOrderType,
+    ExchangeStatus,
 )
 from valrpy.utils import generate_headers, RestException, datetime_to_milliseconds
 from valrpy.messages import (
@@ -17,6 +19,22 @@ from valrpy.messages import (
     FullOrderbookData,
     CurrencyInfo,
     CurrencyPairInfo,
+    PairOrderTypes,
+    MarketSummaryData,
+    HistoricalMarketTrade,
+    ServerTime,
+    ApiKeyInfo,
+    SubaccountInfo,
+    SubaccountBalance,
+    WalletBalance,
+    HistoricalAccountTrade,
+    WhitelistedAddress,
+    CurrencyWithdrawalInfo,
+    WithdrawalStatus,
+    HistoricalDeposit,
+    HistoricalWithdrawal,
+    BankAccountDetail,
+    WireWithdrawal,
 )
 
 
@@ -56,7 +74,9 @@ class ValrRestConnector:
 
         response = self._session.send(request.prepare())
         try:
-            response_json: Union[dict | list] = response.json()
+            response_json: Union[dict | list] = response.json(
+                parse_float=lambda x: Decimal(x)
+            )
             if isinstance(response_json, list):
                 return response_json
 
@@ -154,33 +174,36 @@ class ValrRestConnector:
         )
         return [CurrencyPairInfo.from_raw(raw=raw_pair) for raw_pair in pairs]
 
-    def get_all_order_types(self) -> List[dict]:
+    def get_all_order_types(self) -> List[PairOrderTypes]:
         order_types = self._get(
             endpoint="public/ordertypes",
             auth=False,
         )
-        return order_types
+        return [PairOrderTypes.from_raw(raw=raw_types) for raw_types in order_types]
 
-    def get_symbol_order_types(self, symbol: str) -> List[str]:
+    def get_symbol_order_types(self, symbol: str) -> List[OrderType]:
         order_types = self._get(
             endpoint=f"public/{symbol}/ordertypes",
             auth=False,
         )
-        return order_types
+        return [OrderType(order_type.upper() for order_type in order_types)]
 
-    def get_all_market_summaries(self) -> List[dict]:
+    def get_all_market_summaries(self) -> List[MarketSummaryData]:
         market_summaries = self._get(
             endpoint="public/marketsummary",
             auth=False,
         )
-        return market_summaries
+        return [
+            MarketSummaryData.from_raw(raw=raw_summary)
+            for raw_summary in market_summaries
+        ]
 
-    def get_symbol_market_summary(self, symbol: str) -> dict:
+    def get_symbol_market_summary(self, symbol: str) -> MarketSummaryData:
         market_summary = self._get(
             endpoint=f"public/{symbol}/marketsummary",
             auth=False,
         )
-        return market_summary
+        return MarketSummaryData.from_raw(raw=market_summary)
 
     def get_trade_history(
         self,
@@ -189,7 +212,7 @@ class ValrRestConnector:
         limit: int = 10,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-    ) -> List[dict]:
+    ) -> List[HistoricalMarketTrade]:
         params = {
             "skip": skip,
             "limit": limit,
@@ -201,46 +224,54 @@ class ValrRestConnector:
             params=params,
             auth=False,
         )
-        return trade_history
+        return [
+            HistoricalMarketTrade.from_raw(raw=raw_trade) for raw_trade in trade_history
+        ]
 
-    def get_server_time(self) -> dict:
+    def get_server_time(self) -> ServerTime:
         server_time = self._get(
             endpoint="public/time",
             auth=False,
         )
-        return server_time
+        return ServerTime.from_raw(raw=server_time)
 
-    def get_exchange_status(self) -> dict:
+    def get_exchange_status(self) -> ExchangeStatus:
         exchange_status = self._get(
             endpoint="public/status",
             auth=False,
         )
-        return exchange_status
+        return ExchangeStatus(exchange_status["status"].upper().replace("-", "_"))
 
     # ========== ACCOUNT INFO ==========:
 
-    def get_current_api_key_info(self) -> dict:
+    def get_current_api_key_info(self) -> ApiKeyInfo:
         info = self._get(
             endpoint="account/api-keys/current",
             auth=True,
         )
-        return info
+        return ApiKeyInfo.from_raw(raw=info)
 
-    def get_subaccounts(self) -> List[dict]:
+    def get_subaccounts(self) -> List[SubaccountInfo]:
         subaccounts = self._get(
             endpoint="account/subaccounts",
             auth=True,
         )
-        return subaccounts
+        return [SubaccountInfo(**sub_info) for sub_info in subaccounts]
 
-    def get_non_zero_balances(self) -> List[dict]:
+    def get_non_zero_balances(self) -> List[SubaccountBalance]:
         balances = self._get(
             endpoint="account/balances/all",
             auth=True,
         )
-        return balances
+        return [SubaccountBalance.from_raw(raw=balances)]
 
-    def register_subaccount(self, label: str) -> dict:
+    def register_subaccount(self, label: str) -> int:
+        """
+        Register a new subaccount.
+
+        :param label: The subaccount label.
+        :return: The subaccount ID.
+        """
         params = {
             "label": label,
         }
@@ -249,7 +280,7 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return int(response["id"])
 
     def make_internal_transfer(
         self,
@@ -271,12 +302,12 @@ class ValrRestConnector:
         )
         return response
 
-    def get_balances(self) -> List[dict]:
+    def get_wallet_balances(self) -> List[WalletBalance]:
         balances = self._get(
             endpoint="account/balances",
             auth=True,
         )
-        return balances
+        return [WalletBalance.from_raw(raw=raw_balance) for raw_balance in balances]
 
     def get_transaction_history(
         self,
@@ -304,7 +335,9 @@ class ValrRestConnector:
         )
         return transactions
 
-    def get_symbol_trade_history(self, symbol: str, limit: int = 10) -> List[dict]:
+    def get_symbol_trade_history(
+        self, symbol: str, limit: int = 10
+    ) -> List[HistoricalAccountTrade]:
         params = {
             "limit": limit,
         }
@@ -313,41 +346,44 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return trade_history
+        return [
+            HistoricalAccountTrade.from_raw(raw=raw_trade)
+            for raw_trade in trade_history
+        ]
 
     # ========== WALLET INFO ==========:
 
-    def get_currency_deposit_address(self, currency: str) -> dict:
-        deposit_address = self._get(
+    def get_currency_deposit_address(self, currency: str) -> str:
+        response = self._get(
             endpoint=f"wallet/crypto/{currency}/deposit/address",
             auth=True,
         )
-        return deposit_address
+        return response["address"]
 
-    def get_whitelisted_withdrawal_address_book(self) -> List[dict]:
+    def get_whitelisted_withdrawal_address_book(
+        self, currency: Optional[str] = None
+    ) -> List[WhitelistedAddress]:
+        endpoint = (
+            "wallet/crypto/address-book"
+            if currency is None
+            else f"wallet/crypto/address-book/{currency}"
+        )
         address_book = self._get(
-            endpoint="wallet/crypto/address-book",
+            endpoint=endpoint,
             auth=True,
         )
-        return address_book
+        return [WhitelistedAddress.from_raw(raw=raw_info) for raw_info in address_book]
 
-    def get_currency_whitelisted_withdrawal_address_book(self, currency: str) -> dict:
-        address_book = self._get(
-            endpoint=f"wallet/crypto/address-book/{currency}",
-            auth=True,
-        )
-        return address_book
-
-    def get_withdrawal_info(self, currency: str) -> dict:
+    def get_currency_withdrawal_info(self, currency: str) -> CurrencyWithdrawalInfo:
         info = self._get(
             endpoint=f"wallet/crypto/{currency}/withdraw",
             auth=True,
         )
-        return info
+        return CurrencyWithdrawalInfo.from_raw(raw=info)
 
     def make_crypto_withdrawal(
         self, currency: str, amount: Decimal, address: str
-    ) -> dict:
+    ) -> str:
         params = {
             "amount": amount,
             "address": address,
@@ -357,18 +393,20 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return response["id"]
 
-    def get_withdrawal_status(self, currency: str, withdrawal_id: str) -> dict:
+    def get_withdrawal_status(
+        self, currency: str, withdrawal_id: str
+    ) -> WithdrawalStatus:
         status = self._get(
             endpoint=f"wallet/crypto/{currency}/withdraw/{withdrawal_id}",
             auth=True,
         )
-        return status
+        return WithdrawalStatus.from_raw(raw=status)
 
     def get_deposit_history(
         self, currency: str, skip: int = 0, limit: int = 10
-    ) -> dict:
+    ) -> List[HistoricalDeposit]:
         params = {
             "skip": skip,
             "limit": limit,
@@ -378,11 +416,11 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return history
+        return [HistoricalDeposit.from_raw(raw=raw_deposit) for raw_deposit in history]
 
     def get_withdrawal_history(
         self, currency: str, skip: int = 0, limit: int = 10
-    ) -> dict:
+    ) -> List[HistoricalWithdrawal]:
         params = {
             "skip": skip,
             "limit": limit,
@@ -392,25 +430,28 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return history
+        return [
+            HistoricalWithdrawal.from_raw(raw=raw_withdrawal)
+            for raw_withdrawal in history
+        ]
 
-    def get_associated_bank_accounts(self, currency: str) -> List[dict]:
+    def get_associated_bank_accounts(self, currency: str) -> List[BankAccountDetail]:
         accounts = self._get(
             endpoint=f"wallet/fiat/{currency}/accounts",
             auth=True,
         )
-        return accounts
+        return [BankAccountDetail.from_raw(raw=account) for account in accounts]
 
-    def get_deposit_reference(self, currency: str) -> dict:
+    def get_deposit_reference(self, currency: str) -> str:
         reference = self._get(
             endpoint=f"wallet/fiat/{currency}/deposit/reference",
             auth=True,
         )
-        return reference
+        return reference["reference"]
 
     def make_fiat_withdrawal(
         self, currency: str, amount: Decimal, bank_account_id: str, fast: bool
-    ) -> dict:
+    ) -> str:
         params = {
             "amount": amount,
             "linkedBankAccountId": bank_account_id,
@@ -421,7 +462,7 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return response["id"]
 
     def get_wire_accounts(self) -> List[dict]:
         accounts = self._get(
@@ -430,7 +471,7 @@ class ValrRestConnector:
         )
         return accounts
 
-    def make_wire_withdrawal(self, amount: str, wire_account_id: str) -> dict:
+    def make_wire_withdrawal(self, amount: str, wire_account_id: str) -> WireWithdrawal:
         params = {
             "amount": amount,
             "wireBankAccountId": wire_account_id,
@@ -440,7 +481,7 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return WireWithdrawal.from_raw(raw=response)
 
     # ========== SIMPLE TRADE ENDPOINTS ==========:
 
