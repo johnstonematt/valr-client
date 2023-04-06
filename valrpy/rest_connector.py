@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import datetime
 from typing import List, Optional, Union
 
-from requests import Session, Request
+from requests import Session, Request, JSONDecodeError
 
 from valrpy.enums import (
     TransactionType,
@@ -13,6 +13,7 @@ from valrpy.enums import (
     TriggerOrderType,
     ExchangeStatus,
 )
+from valrpy.constants import Number
 from valrpy.utils import generate_headers, RestException, datetime_to_milliseconds
 from valrpy.messages import (
     AggregatedOrderbookData,
@@ -35,6 +36,9 @@ from valrpy.messages import (
     HistoricalWithdrawal,
     BankAccountDetail,
     WireWithdrawal,
+    OrderStatus,
+    RestOpenOrder,
+    HistoricalOrder,
 )
 
 
@@ -65,7 +69,7 @@ class ValrRestConnector:
         endpoint: str,
         auth: bool,
         **kwargs,
-    ) -> dict | list:
+    ) -> Optional[dict | list]:
         request = Request(
             method=method,
             url=f"{self._url}/{endpoint}",
@@ -99,8 +103,12 @@ class ValrRestConnector:
                 f"Response was: {response_json}"
             )
 
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, JSONDecodeError):
             response.raise_for_status()
+            # when sending delete requests, we sometimes get a 202 status code in which everything went fine,
+            # but it still raises a json decode error, so in that case we just return nothing
+            if response.status_code in (200, 202) and method == "DELETE":
+                return
             raise
 
     def _sign_request(self, request: Request, endpoint: str) -> None:
@@ -110,12 +118,18 @@ class ValrRestConnector:
                 "Without an api-key, you can only hit public endpoints"
             )
 
+        if request.method in ("GET", "POST"):
+            payload = "" if request.json is None else request.json
+
+        else:
+            payload = request.json
+
         headers = generate_headers(
             api_key=self._api_key,
             api_secret=self._api_secret,
             method=request.method,
             path=f"/v1/{endpoint}",
-            body="" if request.json is None else request.json,
+            body=payload,
         )
         for header_name, header_val in headers.items():
             request.headers[header_name] = header_val
@@ -294,7 +308,7 @@ class ValrRestConnector:
         from_id: str,
         to_id: str,
         symbol: str,
-        amount: Decimal,
+        amount: Number,
     ) -> dict:
         params = {
             "fromId": from_id,
@@ -389,7 +403,7 @@ class ValrRestConnector:
         return CurrencyWithdrawalInfo.from_raw(raw=info)
 
     def make_crypto_withdrawal(
-        self, currency: str, amount: Decimal, address: str
+        self, currency: str, amount: Number, address: str
     ) -> str:
         params = {
             "amount": str(amount),
@@ -457,7 +471,7 @@ class ValrRestConnector:
         return str(reference["reference"])
 
     def make_fiat_withdrawal(
-        self, currency: str, amount: Decimal, bank_account_id: str, fast: bool
+        self, currency: str, amount: Number, bank_account_id: str, fast: bool
     ) -> str:
         params = {
             "amount": str(amount),
@@ -493,7 +507,7 @@ class ValrRestConnector:
     # ========== SIMPLE TRADE ENDPOINTS ==========:
 
     def get_simple_trade_quote(
-        self, symbol: str, pay_currency: str, pay_amount: Decimal, side: OrderSide
+        self, symbol: str, pay_currency: str, pay_amount: Number, side: OrderSide
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
@@ -508,7 +522,7 @@ class ValrRestConnector:
         return response
 
     def submit_simple_order(
-        self, symbol: str, pay_currency: str, pay_amount: Decimal, side: OrderSide
+        self, symbol: str, pay_currency: str, pay_amount: Number, side: OrderSide
     ) -> dict:
         params = {
             "payInCurrency": pay_currency,
@@ -534,7 +548,7 @@ class ValrRestConnector:
     def make_new_payment(
         self,
         currency: str,
-        amount: Decimal,
+        amount: Number,
         recipient: str,
         recipient_note: Optional[str] = None,
         sender_note: Optional[str] = None,
@@ -607,12 +621,12 @@ class ValrRestConnector:
         self,
         symbol: str,
         side: OrderSide,
-        quantity: Decimal,
-        price: Decimal,
+        quantity: Number,
+        price: Number,
         post_only: Optional[bool] = None,
         client_order_id: Optional[int] = None,
         time_in_force: TimeInForce = TimeInForce.GTC,
-    ) -> dict:
+    ) -> str:
         params = {
             "side": side,
             "quantity": str(quantity),
@@ -627,19 +641,33 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return str(response["id"])
 
     def place_market_order(
         self,
         symbol: str,
         side: OrderSide,
-        quantity: Decimal,
+        base_amount: Optional[Number] = None,
+        quote_amount: Optional[Number] = None,
         client_order_id: Optional[int] = None,
-    ) -> dict:
+    ) -> str:
+        if (base_amount is None and quote_amount is None) or (
+            base_amount is not None and quote_amount is not None
+        ):
+            raise ValueError(
+                f"Must provide either a quote amount or a base amount, not both."
+            )
+
+        if base_amount is not None:
+            amount_key, amount = "baseAmount", base_amount
+
+        else:
+            amount_key, amount = "quoteAmount", quote_amount
+
         params = {
             "pair": symbol,
             "side": side,
-            "quantity": str(quantity),
+            amount_key: amount,
             "customerOrderId": client_order_id,
         }
         response = self._post(
@@ -647,19 +675,19 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return str(response["id"])
 
     def place_trigger_limit_order(
         self,
         symbol: str,
         side: OrderSide,
-        quantity: Decimal,
-        price: Decimal,
-        trigger_price: Decimal,
+        quantity: Number,
+        price: Number,
+        trigger_price: Number,
         order_type: TriggerOrderType,
         client_order_id: Optional[int] = None,
         time_in_force: TimeInForce = TimeInForce.GTC,
-    ) -> dict:
+    ) -> str:
         params = {
             "pair": symbol,
             "side": side,
@@ -675,14 +703,14 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return response
+        return str(response["id"])
 
     def get_order_status(
         self,
         symbol: str,
         order_id: Optional[str] = None,
         client_order_id: Optional[int] = None,
-    ) -> dict:
+    ) -> OrderStatus:
         if (order_id is None and client_order_id is None) or (
             order_id is not None and client_order_id is not None
         ):
@@ -697,18 +725,18 @@ class ValrRestConnector:
             endpoint=endpoint,
             auth=True,
         )
-        return status
+        return OrderStatus.from_raw(raw=status)
 
-    def get_open_orders(self) -> List[dict]:
+    def get_open_orders(self) -> List[RestOpenOrder]:
         open_orders = self._get(
             endpoint="orders/open",
             auth=True,
         )
-        return open_orders
+        return [RestOpenOrder.from_raw(raw=raw_order) for raw_order in open_orders]
 
     def get_order_history(
         self, skip: int = 0, limit: Optional[int] = None
-    ) -> List[dict]:
+    ) -> List[HistoricalOrder]:
         params = {
             "skip": skip,
             "limit": limit,
@@ -718,13 +746,13 @@ class ValrRestConnector:
             params=params,
             auth=True,
         )
-        return order_history
+        return [HistoricalOrder.from_raw(raw=raw_order) for raw_order in order_history]
 
     def get_old_order_summary(
         self,
         order_id: Optional[str] = None,
         client_order_id: Optional[int] = None,
-    ) -> dict:
+    ) -> HistoricalOrder:
         if (order_id is None and client_order_id is None) or (
             order_id is not None and client_order_id is not None
         ):
@@ -739,7 +767,7 @@ class ValrRestConnector:
             endpoint=endpoint,
             auth=True,
         )
-        return summary
+        return HistoricalOrder.from_raw(raw=summary)
 
     def get_old_order_details(
         self,

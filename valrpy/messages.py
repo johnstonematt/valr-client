@@ -16,7 +16,13 @@ from typing import (
 )
 
 from valrpy.constants import TIMEZONE, DATETIME_FORMAT
-from valrpy.enums import OrderSide, TransactionType, OrderType, WebsocketMessageType
+from valrpy.enums import (
+    OrderSide,
+    TransactionType,
+    OrderType,
+    WebsocketMessageType,
+    TimeInForce,
+)
 
 
 __all__ = [
@@ -59,6 +65,9 @@ __all__ = [
     "BankAccountInfo",
     "BankInfo",
     "WireWithdrawal",
+    "OrderStatus",
+    "RestOpenOrder",
+    "HistoricalOrder",
 ]
 
 logger = logging.getLogger(__name__)
@@ -126,7 +135,7 @@ def _parse_to_desired_type(
             return desired_type(obj)
 
         except ValueError:
-            return desired_type(obj.upper())
+            return desired_type(obj.upper().replace("-", "_").replace(" ", "_"))
 
     # this is to avoid float inaccuracy such as
     # Decimal(0.0001) = 0.000100000000000000004792173602385929598312941379845142364501953125
@@ -214,6 +223,10 @@ def _apply_snake_case(camel_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class MessageElement:
+    """
+    Base class for json parsing into python objects.
+    """
+
     @classmethod
     def from_raw(cls: Type["U"], raw: dict) -> "U":
         try:
@@ -331,6 +344,9 @@ class MarketSummaryData(MessageElement):
     created: datetime
     change_from_previous: Decimal
     mark_price: Decimal
+
+    def mid_price(self) -> Decimal:
+        return (self.ask_price + self.bid_price) / 2
 
 
 @dataclass
@@ -883,3 +899,69 @@ class WireWithdrawal(MessageElement):
     status: str
     created_at: datetime
     wire_bank_account_id: str
+
+
+@dataclass
+class OrderStatus(MessageElement):
+    """
+    Order status.
+    """
+
+    order_id: str
+    order_status_type: str
+    currency_pair: str
+    original_price: Decimal
+    remaining_quantity: Decimal
+    original_quantity: Decimal
+    order_side: OrderSide
+    order_type: OrderType
+    failed_reason: Optional[str]
+    order_updated_at: datetime
+    order_created_at: datetime
+    customer_order_id: Optional[str]
+    time_in_force: TimeInForce
+
+
+@dataclass
+class RestOpenOrder(MessageElement):
+    """
+    Data format when rest polling open orders
+    """
+
+    order_id: str
+    side: OrderSide
+    remaining_quantity: Decimal
+    price: Decimal
+    currency_pair: str
+    created_at: datetime
+    original_quantity: Decimal
+    filled_percentage: Decimal
+    stop_price: Optional[Decimal]
+    updated_at: datetime
+    status: str
+    type: OrderType
+    time_in_force: TimeInForce
+
+
+@dataclass
+class HistoricalOrder(MessageElement):
+    """
+    Data format for historical orders
+    """
+
+    order_id: str
+    order_status_type: str
+    currency_pair: str
+    average_price: Decimal
+    original_price: Decimal
+    remaining_quantity: Decimal
+    original_quantity: Decimal
+    total: Decimal
+    total_fee: Decimal
+    fee_currency: str
+    order_side: OrderSide
+    order_type: OrderType
+    failed_reason: Optional[str]
+    order_updated_at: datetime
+    order_created_at: datetime
+    time_in_force: TimeInForce
