@@ -1,4 +1,5 @@
 import logging
+from enum import Enum
 from datetime import datetime
 from decimal import Decimal
 from dataclasses import dataclass
@@ -57,6 +58,7 @@ __all__ = [
     "BankAccountDetail",
     "BankAccountInfo",
     "BankInfo",
+    "WireWithdrawal",
 ]
 
 logger = logging.getLogger(__name__)
@@ -67,11 +69,15 @@ T = TypeVar("T")
 def _parse_to_desired_type(
     obj: Any,
     desired_type: Type[T],
+    param_name: str,
 ) -> T:
     type_name = str(desired_type)
     # check that the param is present:
     if obj is None and not type_name.startswith("typing.Optional"):
-        raise TypeError(f"Expected type {type_name}, but received None.")
+        raise TypeError(
+            f"Param {param_name} does not accept None. "
+            f"Expected type {type_name}, but received None."
+        )
 
     # handle 'Any' case:
     if type_name == Any:
@@ -90,6 +96,7 @@ def _parse_to_desired_type(
                 result = _parse_to_desired_type(
                     obj=obj,
                     desired_type=inner_types[0],
+                    param_name=param_name,
                 )
                 return result
 
@@ -98,6 +105,7 @@ def _parse_to_desired_type(
                 _parse_to_desired_type(
                     obj=item,
                     desired_type=inner_types[0],
+                    param_name=param_name,
                 )
                 for item in obj
             ]
@@ -109,9 +117,20 @@ def _parse_to_desired_type(
     if isinstance(obj, desired_type):
         return obj
 
+    # handle enums and casing:
+    if issubclass(desired_type, Enum):
+        if not isinstance(obj, str):
+            raise TypeError(f"Can only convert strings to Enum, not {type_name}")
+
+        try:
+            return desired_type(obj)
+
+        except ValueError:
+            return desired_type(obj.upper())
+
     # this is to avoid float inaccuracy such as
     # Decimal(0.0001) = 0.000100000000000000004792173602385929598312941379845142364501953125
-    if issubclass(desired_type, Decimal):
+    if issubclass(desired_type, Decimal) and isinstance(obj, float):
         return Decimal(str(obj))
 
     if issubclass(desired_type, bool):
@@ -137,12 +156,17 @@ def _parse_to_desired_type(
 
             # this is a strange case where sometimes a datetime will come through like '2023-04-05T14:32:5100',
             # and presumably the last 4 characters mean 51 seconds
-            if len(obj) == 21:
-                return datetime.strptime(obj[:-2], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=TIMEZONE)
+            if "." not in obj:
+                obj = f"{obj[:19]}.000"
 
             # VALR typically uses millisecond granularity and then appends a 'Z' at the end,
             # so we remove Z + add '000' to convert to microseconds
-            return datetime.strptime(obj + "000", DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
+            if len(obj) > 26:
+                obj = obj[:26]
+            else:
+                obj += (26 - len(obj)) * "0"
+
+            return datetime.strptime(obj, DATETIME_FORMAT).replace(tzinfo=TIMEZONE)
 
         else:
             raise TypeError(
@@ -158,10 +182,7 @@ def _parse_to_desired_type(
                 f"Can't convert object of type {type(obj).__name__} to {desired_type.__name__}."
             )
 
-    # this shouldn't run:
-    raise TypeError(
-        f"Unimplemented case of converting {type(obj).__name__} to {desired_type.__name__}."
-    )
+    return desired_type(obj)
 
 
 def _convert_to_snake_case(camel_case: str) -> str:
@@ -175,6 +196,9 @@ def _convert_to_snake_case(camel_case: str) -> str:
 
         else:
             snake_case += character
+
+    # valr treats subaccount as two words, and i'm pretty sure it's one, so we fix:
+    snake_case = snake_case.replace("sub_account", "subaccount")
 
     return snake_case.lstrip("_")
 
@@ -192,20 +216,36 @@ def _apply_snake_case(camel_dict: Dict[str, Any]) -> Dict[str, Any]:
 class MessageElement:
     @classmethod
     def from_raw(cls: Type["U"], raw: dict) -> "U":
-        type_hints = get_type_hints(cls.__init__)
-        if "return" in type_hints:
-            type_hints.pop("return")
+        try:
+            type_hints = get_type_hints(cls.__init__)
+            if "return" in type_hints:
+                type_hints.pop("return")
 
-        raw = _apply_snake_case(camel_dict=raw)
+            raw = _apply_snake_case(camel_dict=raw)
+            # check for no unexpected arguments:
+            unexpected_args = [
+                arg_name for arg_name in raw.keys() if arg_name not in type_hints
+            ]
+            if unexpected_args:
+                raise ValueError(
+                    f"{cls.__name__}.from_raw() received unexpected args: {unexpected_args}"
+                )
 
-        parsed_kwargs = {}
-        for param_name, desired_type in type_hints.items():
-            parsed_kwargs[param_name] = _parse_to_desired_type(
-                obj=raw.get(param_name),
-                desired_type=desired_type,
+            parsed_kwargs = {}
+            for param_name, desired_type in type_hints.items():
+                parsed_kwargs[param_name] = _parse_to_desired_type(
+                    obj=raw.get(param_name),
+                    desired_type=desired_type,
+                    param_name=param_name,
+                )
+
+            return cls(**parsed_kwargs)
+
+        except Exception as e:
+            logger.error(
+                f"{type(e).__name__}({e}) while calling {cls.__name__}.from_raw(), data was: {raw}"
             )
-
-        return cls(**parsed_kwargs)
+            raise
 
 
 U = TypeVar("U", bound=MessageElement)
@@ -242,8 +282,12 @@ class OrderbookOrder(MessageElement):
     Order-summary in an orderbook.
     """
 
-    order_id: str
+    side: OrderSide
     quantity: Decimal
+    price: Decimal
+    currency_pair: str
+    id: str
+    position_at_price: int
 
 
 @dataclass
@@ -262,11 +306,11 @@ class FullOrderbookData(MessageElement):
     Data-format for full orderbook (snapshot + update).
     """
 
-    last_change: int
-    asks: List[OrderbookLevel]
-    bids: List[OrderbookLevel]
+    last_change: datetime
+    asks: List[OrderbookOrder]
+    bids: List[OrderbookOrder]
     sequence_number: int
-    checksum: int
+    checksum: Optional[int]
 
 
 @dataclass
@@ -281,9 +325,10 @@ class MarketSummaryData(MessageElement):
     last_traded_price: Decimal
     previous_close_price: Decimal
     base_volume: Decimal
+    quote_volume: Decimal
     high_price: Decimal
     low_price: Decimal
-    created_at: datetime
+    created: datetime
     change_from_previous: Decimal
     mark_price: Decimal
 
@@ -315,10 +360,11 @@ class CurrencyInfo(MessageElement):
     is_active: bool
     short_name: str
     long_name: str
-    supported_withdraw_decimal_places: int
+    withdrawal_decimal_places: int
     collateral: Optional[bool]
     collateral_weight: Optional[Decimal]
     id: Optional[int]
+    payment_reference_field_name: Optional[str]
 
 
 @dataclass
@@ -327,13 +373,16 @@ class CurrencyPairInfo(MessageElement):
     data-format for currency-pair info
     """
 
-    id: int
+    id: Optional[int]
     symbol: str
-    base_currency: CurrencyInfo
-    quote_currency: CurrencyInfo
+    base_currency: str | CurrencyInfo
+    quote_currency: str | CurrencyInfo
     short_name: str
-    exchange: str
+    exchange: Optional[str]
     active: bool
+    tick_size: Decimal
+    base_decimal_places: int
+    margin_trading_allowed: bool
     min_base_amount: Decimal
     max_base_amount: Decimal
     min_quote_amount: Decimal
@@ -622,8 +671,9 @@ class ApiKeyInfo(MessageElement):
     label: str
     permissions: List[str]
     added_at: datetime
-    allowed_ip_address_cidr: str
-    allowed_withdraw_address_list: List[WithdrawalAddress]
+    allowed_ip_address_cidr: Optional[str]
+    allowed_withdraw_address_list: Optional[List[WithdrawalAddress]]
+    is_subaccount: bool
 
 
 @dataclass
@@ -650,16 +700,6 @@ class BalanceSummary(MessageElement):
 
 
 @dataclass
-class SubaccountBalance(MessageElement):
-    """
-    Subaccount balance.
-    """
-
-    account: SubaccountInfo
-    balances: List[BalanceSummary]
-
-
-@dataclass
 class WalletBalance(MessageElement):
     """
     Wallet balance.
@@ -669,10 +709,20 @@ class WalletBalance(MessageElement):
     available: Decimal
     reserved: Decimal
     total: Decimal
-    updated_at: datetime
+    updated_at: Optional[datetime]
     lend_reserved: Decimal
     borrow_reserved: Decimal
     borrowed_amount: Decimal
+
+
+@dataclass
+class SubaccountBalance(MessageElement):
+    """
+    Subaccount balance.
+    """
+
+    account: SubaccountInfo
+    balances: List[WalletBalance]
 
 
 @dataclass

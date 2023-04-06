@@ -38,6 +38,11 @@ from valrpy.messages import (
 )
 
 
+__all__ = [
+    "ValrRestConnector",
+]
+
+
 class ValrRestConnector:
     """
     Client for accessing public api endpoints.
@@ -158,6 +163,7 @@ class ValrRestConnector:
             endpoint=f"public/{symbol}/orderbook/full",
             auth=False,
         )
+        # return orderbook
         return FullOrderbookData.from_raw(raw=orderbook)
 
     def get_currencies(self) -> List[CurrencyInfo]:
@@ -186,7 +192,8 @@ class ValrRestConnector:
             endpoint=f"public/{symbol}/ordertypes",
             auth=False,
         )
-        return [OrderType(order_type.upper() for order_type in order_types)]
+        # return order_types
+        return [OrderType(order_type.upper()) for order_type in order_types]
 
     def get_all_market_summaries(self) -> List[MarketSummaryData]:
         market_summaries = self._get(
@@ -263,7 +270,7 @@ class ValrRestConnector:
             endpoint="account/balances/all",
             auth=True,
         )
-        return [SubaccountBalance.from_raw(raw=balances)]
+        return [SubaccountBalance.from_raw(raw=balance) for balance in balances]
 
     def register_subaccount(self, label: str) -> int:
         """
@@ -358,7 +365,7 @@ class ValrRestConnector:
             endpoint=f"wallet/crypto/{currency}/deposit/address",
             auth=True,
         )
-        return response["address"]
+        return str(response["address"])
 
     def get_whitelisted_withdrawal_address_book(
         self, currency: Optional[str] = None
@@ -447,7 +454,7 @@ class ValrRestConnector:
             endpoint=f"wallet/fiat/{currency}/deposit/reference",
             auth=True,
         )
-        return reference["reference"]
+        return str(reference["reference"])
 
     def make_fiat_withdrawal(
         self, currency: str, amount: Decimal, bank_account_id: str, fast: bool
