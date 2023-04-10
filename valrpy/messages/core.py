@@ -282,7 +282,7 @@ class AggregatedOrderbookLevel(MessageElement):
     quantity: Decimal
     price: Decimal
     currency_pair: str
-    order_count: int
+    order_count: Optional[int]
 
 
 @dataclass
