@@ -10,7 +10,6 @@ from websocket import WebSocketApp
 from valrpy.utils import generate_headers, enforce_type
 from valrpy.enums import WebsocketType, WebsocketMessageType
 from valrpy.messages.core import (
-    MessageElement,
     AggregatedOrderbook,
     TradeBucket,
     MarketSummary,
@@ -29,6 +28,7 @@ from valrpy.messages.websocket import (
     OrderStatusUpdate,
     NewPendingReceive,
     ParsedMessage,
+    MessageData,
 )
 
 
@@ -175,9 +175,12 @@ class ValrWebsocketConnector:
     Connector for VALR websocket api.
     """
 
-    def __init__(self, api_key: str, api_secret: str) -> None:
+    def __init__(
+        self, api_key: str, api_secret: str, subaccount: Optional[str] = None
+    ) -> None:
         self._api_key = api_key
         self._api_secret = api_secret
+        self._subaccount = subaccount
         self.base_url = "wss://api.valr.com"
         self.queue: Queue[ParsedMessage] = Queue()
 
@@ -206,7 +209,7 @@ class ValrWebsocketConnector:
         if raw_data is None:
             raise ValueError(f"No data in the message: {message}")
 
-        data: MessageElement | List[MessageElement]
+        data: MessageData
         match message_type:
             case WebsocketMessageType.AGGREGATED_ORDERBOOK_UPDATE:
                 data = AggregatedOrderbook.from_raw(raw=raw_data)
@@ -310,6 +313,7 @@ class ValrWebsocketConnector:
                 method="GET",
                 path=websocket_type.path(),
                 body="",
+                subaccount_id=self._subaccount,
             )
             pipeline = WebsocketPipeline(
                 url=f"{self.base_url}{websocket_type.path()}",

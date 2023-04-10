@@ -16,6 +16,7 @@ from valrpy.messages.core import (
     CurrencyPairInfo,
     AggregatedOrderbook,
     TradeBucket,
+    MarketSummary,
 )
 
 
@@ -264,6 +265,7 @@ class NewPendingReceive(MessageElement):
 
 MessageData: TypeAlias = (
     AggregatedOrderbook
+    | MarketSummary
     | TradeBucket
     | WebsocketFullOrderbook
     | BalanceUpdate
@@ -277,6 +279,7 @@ MessageData: TypeAlias = (
     | NewAccountHistoryRecord
     | OrderStatusUpdate
     | NewPendingReceive
+    | NewAccountTrade
 )
 
 

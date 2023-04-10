@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 from valrpy.enums import OrderSide, OrderType
 from valrpy.rest_connector import ValrRestConnector
-from valrpy.messages import *
+from valrpy.messages.core import MarketSummary
+from valrpy.messages.rest import HistoricalOrder, OrderStatus
 
 
 load_dotenv("../.env.local")
@@ -59,7 +60,7 @@ def test_place_market_order() -> None:
 
 def test_place_limit_order() -> None:
     market_summary = connector.get_symbol_market_summary(symbol=SYMBOL)
-    assert isinstance(market_summary, RestMarketSummaryData)
+    assert isinstance(market_summary, MarketSummary)
 
     order_id = connector.place_limit_order(
         symbol=SYMBOL,

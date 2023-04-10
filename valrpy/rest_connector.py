@@ -55,11 +55,15 @@ class ValrRestConnector:
     """
 
     def __init__(
-        self, api_key: Optional[str] = None, api_secret: Optional[str] = None
+        self,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        subaccount: Optional[str] = None,
     ) -> None:
         self._url = "https://api.valr.com/v1"
         self._api_key = api_key
         self._api_secret = api_secret
+        self._subaccount = subaccount
 
         self._session = Session()
 
@@ -132,6 +136,7 @@ class ValrRestConnector:
             method=request.method,
             path=f"/v1/{endpoint}",
             body=payload,
+            subaccount_id=self._subaccount,
         )
         for header_name, header_val in headers.items():
             request.headers[header_name] = header_val

@@ -3,6 +3,8 @@
 
 # test scripts:
 playground.py
+server.py
+client.py
 
 # testing:
 .pytest_cache
