@@ -59,7 +59,7 @@ def test_place_market_order() -> None:
 
 def test_place_limit_order() -> None:
     market_summary = connector.get_symbol_market_summary(symbol=SYMBOL)
-    assert isinstance(market_summary, MarketSummaryData)
+    assert isinstance(market_summary, RestMarketSummaryData)
 
     order_id = connector.place_limit_order(
         symbol=SYMBOL,

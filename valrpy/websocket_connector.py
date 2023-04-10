@@ -9,23 +9,25 @@ from websocket import WebSocketApp
 
 from valrpy.utils import generate_headers, enforce_type
 from valrpy.enums import WebsocketType, WebsocketMessageType
-from valrpy.messages import (
-    AggregatedOrderbookData,
-    FullOrderbookData,
-    MarketSummaryData,
-    TradeBucketData,
-    NewTradeData,
-    OpenOrderInfo,
-    BalanceUpdateData,
-    NewAccountHistoryRecordData,
-    NewAccountTradeData,
-    InstantOrderCompletedData,
-    OrderProcessedData,
-    OrderStatusUpdateData,
-    FailedCancelOrderData,
-    NewPendingReceiveData,
-    SendStatusUpdateData,
-    MessageData,
+from valrpy.messages.core import (
+    MessageElement,
+    AggregatedOrderbook,
+    TradeBucket,
+    MarketSummary,
+)
+from valrpy.messages.websocket import (
+    WebsocketOpenOrderInfo,
+    WebsocketFullOrderbook,
+    BalanceUpdate,
+    NewAccountTrade,
+    InstantOrderCompletedNotification,
+    OrderProcessedNotification,
+    FailedCancelOrderNotification,
+    StatusUpdate,
+    NewTrade,
+    NewAccountHistoryRecord,
+    OrderStatusUpdate,
+    NewPendingReceive,
     ParsedMessage,
 )
 
@@ -204,53 +206,56 @@ class ValrWebsocketConnector:
         if raw_data is None:
             raise ValueError(f"No data in the message: {message}")
 
-        data: MessageData
+        data: MessageElement | List[MessageElement]
         match message_type:
             case WebsocketMessageType.AGGREGATED_ORDERBOOK_UPDATE:
-                data = AggregatedOrderbookData.from_raw(raw=raw_data)
+                data = AggregatedOrderbook.from_raw(raw=raw_data)
 
-            case WebsocketMessageType.FULL_ORDERBOOK_UPDATE:
-                data = FullOrderbookData.from_raw(raw=raw_data)
+            case WebsocketMessageType.FULL_ORDERBOOK_UPDATE | WebsocketMessageType.FULL_ORDERBOOK_SNAPSHOT:
+                data = WebsocketFullOrderbook.from_raw(raw=raw_data)
 
             case WebsocketMessageType.MARKET_SUMMARY_UPDATE:
-                data = MarketSummaryData.from_raw(raw=raw_data)
+                data = MarketSummary.from_raw(raw=raw_data)
 
             case WebsocketMessageType.NEW_TRADE_BUCKET:
-                data = TradeBucketData.from_raw(raw=raw_data)
+                data = TradeBucket.from_raw(raw=raw_data)
 
             case WebsocketMessageType.NEW_TRADE:
-                data = NewTradeData.from_raw(raw=raw_data)
+                data = NewTrade.from_raw(raw=raw_data)
 
             case WebsocketMessageType.OPEN_ORDERS_UPDATE:
                 enforce_type(obj=raw_data, obj_type=list)
-                data = [OpenOrderInfo.from_raw(raw=raw_order) for raw_order in raw_data]
+                data = [
+                    WebsocketOpenOrderInfo.from_raw(raw=raw_order)
+                    for raw_order in raw_data
+                ]
 
             case WebsocketMessageType.NEW_ACCOUNT_HISTORY_RECORD:
-                data = NewAccountHistoryRecordData.from_raw(raw=raw_data)
+                data = NewAccountHistoryRecord.from_raw(raw=raw_data)
 
             case WebsocketMessageType.BALANCE_UPDATE:
-                data = BalanceUpdateData.from_data(raw=raw_data)
+                data = BalanceUpdate.from_raw(raw=raw_data)
 
             case WebsocketMessageType.NEW_ACCOUNT_TRADE:
-                data = NewAccountTradeData.from_raw(raw=raw_data)
+                data = NewAccountTrade.from_raw(raw=raw_data)
 
             case WebsocketMessageType.INSTANT_ORDER_COMPLETED:
-                data = InstantOrderCompletedData.from_raw(raw=raw_data)
+                data = InstantOrderCompletedNotification.from_raw(raw=raw_data)
 
             case WebsocketMessageType.ORDER_PROCESSED:
-                data = OrderProcessedData.from_raw(raw=raw_data)
+                data = OrderProcessedNotification.from_raw(raw=raw_data)
 
             case WebsocketMessageType.ORDER_STATUS_UPDATE:
-                data = OrderStatusUpdateData.from_raw(raw=raw_data)
+                data = OrderStatusUpdate.from_raw(raw=raw_data)
 
             case WebsocketMessageType.FAILED_CANCEL_ORDER:
-                data = FailedCancelOrderData.from_raw(raw=raw_data)
+                data = FailedCancelOrderNotification.from_raw(raw=raw_data)
 
             case WebsocketMessageType.NEW_PENDING_RECEIVE:
-                data = NewPendingReceiveData.from_raw(raw=raw_data)
+                data = NewPendingReceive.from_raw(raw=raw_data)
 
             case WebsocketMessageType.SEND_STATUS_UPDATE:
-                data = SendStatusUpdateData.from_raw(raw=raw_data)
+                data = StatusUpdate.from_raw(raw=raw_data)
 
             case _:
                 raise NotImplementedError(
@@ -265,6 +270,9 @@ class ValrWebsocketConnector:
     def subscribe_to_market(
         self, event_type: WebsocketMessageType, symbols: List[str]
     ) -> None:
+        if event_type.websocket_type() != WebsocketType.TRADE:
+            raise ValueError(f"Must provide a market-type, not: {event_type}")
+
         message = {
             "type": WebsocketMessageType.SUBSCRIBE,
             "subscriptions": [

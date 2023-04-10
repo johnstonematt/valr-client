@@ -15,13 +15,15 @@ from valrpy.enums import (
 )
 from valrpy.constants import Number
 from valrpy.utils import generate_headers, RestException, datetime_to_milliseconds
-from valrpy.messages import (
-    AggregatedOrderbookData,
-    FullOrderbookData,
+from valrpy.messages.core import (
+    AggregatedOrderbook,
     CurrencyInfo,
     CurrencyPairInfo,
+    MarketSummary,
+)
+from valrpy.messages.rest import (
+    RestFullOrderbook,
     PairOrderTypes,
-    MarketSummaryData,
     HistoricalMarketTrade,
     ServerTime,
     ApiKeyInfo,
@@ -165,20 +167,20 @@ class ValrRestConnector:
 
     # ========== PUBLIC ENDPOINTS ===========:
 
-    def get_aggregated_orderbook(self, symbol: str) -> AggregatedOrderbookData:
+    def get_aggregated_orderbook(self, symbol: str) -> AggregatedOrderbook:
         orderbook_data = self._get(
             endpoint=f"public/{symbol}/orderbook",
             auth=False,
         )
-        return AggregatedOrderbookData.from_raw(raw=orderbook_data)
+        return AggregatedOrderbook.from_raw(raw=orderbook_data)
 
-    def get_full_orderbook(self, symbol: str) -> FullOrderbookData:
+    def get_full_orderbook(self, symbol: str) -> RestFullOrderbook:
         orderbook = self._get(
             endpoint=f"public/{symbol}/orderbook/full",
             auth=False,
         )
         # return orderbook
-        return FullOrderbookData.from_raw(raw=orderbook)
+        return RestFullOrderbook.from_raw(raw=orderbook)
 
     def get_currencies(self) -> List[CurrencyInfo]:
         currencies = self._get(
@@ -209,22 +211,21 @@ class ValrRestConnector:
         # return order_types
         return [OrderType(order_type.upper()) for order_type in order_types]
 
-    def get_all_market_summaries(self) -> List[MarketSummaryData]:
+    def get_all_market_summaries(self) -> List[MarketSummary]:
         market_summaries = self._get(
             endpoint="public/marketsummary",
             auth=False,
         )
         return [
-            MarketSummaryData.from_raw(raw=raw_summary)
-            for raw_summary in market_summaries
+            MarketSummary.from_raw(raw=raw_summary) for raw_summary in market_summaries
         ]
 
-    def get_symbol_market_summary(self, symbol: str) -> MarketSummaryData:
+    def get_symbol_market_summary(self, symbol: str) -> MarketSummary:
         market_summary = self._get(
             endpoint=f"public/{symbol}/marketsummary",
             auth=False,
         )
-        return MarketSummaryData.from_raw(raw=market_summary)
+        return MarketSummary.from_raw(raw=market_summary)
 
     def get_trade_history(
         self,

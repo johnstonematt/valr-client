@@ -2,9 +2,10 @@ import os
 
 from dotenv import load_dotenv
 
-from valrpy.enums import OrderType, ExchangeStatus
+from valrpy.enums import ExchangeStatus
 from valrpy.rest_connector import ValrRestConnector
-from valrpy.messages import *
+from valrpy.messages.core import *
+from valrpy.messages.rest import *
 
 
 load_dotenv("../.env.local")
@@ -28,12 +29,12 @@ def _assert_listed_type(obj: list, desired_type: type) -> None:
 
 def test_get_aggregated_orderbook() -> None:
     orderbook = connector.get_aggregated_orderbook(symbol=SYMBOL)
-    assert isinstance(orderbook, AggregatedOrderbookData)
+    assert isinstance(orderbook, AggregatedOrderbook)
 
 
 def test_get_full_orderbook() -> None:
     orderbook = connector.get_full_orderbook(symbol=SYMBOL)
-    assert isinstance(orderbook, FullOrderbookData)
+    assert isinstance(orderbook, RestFullOrderbook)
 
 
 def test_get_currencies() -> None:
@@ -58,12 +59,12 @@ def test_get_symbol_order_types() -> None:
 
 def test_get_all_market_summaries() -> None:
     market_summaries = connector.get_all_market_summaries()
-    _assert_listed_type(obj=market_summaries, desired_type=MarketSummaryData)
+    _assert_listed_type(obj=market_summaries, desired_type=MarketSummary)
 
 
 def test_get_symbol_market_summary() -> None:
     market_summary = connector.get_symbol_market_summary(symbol=SYMBOL)
-    assert isinstance(market_summary, MarketSummaryData)
+    assert isinstance(market_summary, MarketSummary)
 
 
 # underscore this test because the endpoint doesn't seem to work, for now at least
