@@ -149,6 +149,7 @@ class OrderProcessedNotification(MessageElement):
     order_id: str
     success: bool
     failure_reason: str
+    customer_order_id: Optional[str]
 
 
 @dataclass
@@ -157,8 +158,9 @@ class FailedCancelOrderNotification(MessageElement):
     data-format for a failed cancel order.
     """
 
-    order_id: str
     message: str
+    order_id: Optional[str]
+    customer_order_id: Optional[str]
 
 
 @dataclass
@@ -214,14 +216,14 @@ class NewAccountHistoryRecord(MessageElement):
     """
 
     transaction_type: TransactionTypeInfo
-    debit_currency: CurrencyInfo
-    debit_value: Decimal
-    credit_currency: CurrencyInfo
-    credit_value: Decimal
-    fee_currency: CurrencyInfo
-    fee_value: Decimal
+    debit_currency: Optional[CurrencyInfo]
+    debit_value: Optional[Decimal]
+    credit_currency: Optional[CurrencyInfo]
+    credit_value: Optional[Decimal]
+    fee_currency: Optional[CurrencyInfo]
+    fee_value: Optional[Decimal]
     event_at: datetime
-    additional_info: HistoryRecordAdditionalInfo
+    additional_info: Optional[HistoryRecordAdditionalInfo]
     id: str
 
 

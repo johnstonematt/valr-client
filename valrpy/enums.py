@@ -41,6 +41,7 @@ class OrderType(BaseStrEnum):
     """
 
     LIMIT_POST_ONLY = "LIMIT_POST_ONLY"
+    POST_ONLY_LIMIT = "POST_ONLY_LIMIT"
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     SIMPLE = "SIMPLE"
